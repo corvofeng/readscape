@@ -1,7 +1,7 @@
 name: CI/CD
 
 # 触发：向 main 推送、向 main 的 PR、以及 v* 版本标签；也可手动运行。
-# 说明：dist 分支的推送不会匹配下面的分支过滤，因此不会递归触发。
+# dist 分支只在打 v* 标签时更新；dist 分支的推送不会匹配下面的分支过滤，不会递归触发。
 on:
   push:
     branches: [main]
@@ -41,7 +41,7 @@ jobs:
   publish:
     name: 发布到 dist 分支
     needs: verify
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -20,8 +20,8 @@ npm run list
 GitHub Actions（`.github/workflows/ci-cd.yml`）负责持续集成与发布：
 
 - **`verify`**：向 `main` 推送或提 PR 时运行 `npm ci && npm run check`（构建 + `node --check` 语法检查 + 全部测试），并把 `dist/*.user.js` 作为构建产物上传。
-- **`publish`**：向 `main` 推送（或手动触发）时，构建脚本并强制推送到一个独立的 **`dist` 孤儿分支**（仓库根目录下的 `readscape-<id>.user.js`）。这个分支只放构建产物，与源码分离，提供稳定的 raw 更新地址。
-- **Release**：推送 `v*` 标签时额外创建 GitHub Release，附上**不含 token** 的脚本，便于手动下载安装。
+- **`publish`**：推送 `v*` 标签时（普通 `main` 推送只跑 verify，不更新 dist），构建脚本并强制推送到一个独立的 **`dist` 孤儿分支**（仓库根目录下的 `readscape-<id>.user.js`）。这个分支只放构建产物，与源码分离，提供稳定的 raw 更新地址。
+- **Release**：同一个 `v*` 标签额外创建 GitHub Release，附上**不含 token** 的脚本，便于手动下载安装。
 
 构建器为每个脚本写入 `@updateURL` / `@downloadURL`（外加 `@homepageURL` / `@supportURL`），指向 `dist` 分支的 raw 地址：
 
@@ -40,7 +40,7 @@ https://raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga.user.js
 npm run install-url
 ```
 
-把打印出的 raw 地址粘贴到浏览器即可触发油猴安装；之后提高 `package.json` 版本并推送到 `main`，CI 会更新 `dist` 分支，油猴据此自动检查并安装新版本。也可在油猴里手动「检查更新」。
+把打印出的 raw 地址粘贴到浏览器即可触发油猴安装；之后提高 `package.json` 版本、提交并推送 `v*` 标签，CI 才会更新 `dist` 分支，油猴据此自动检查并安装新版本。也可在油猴里手动「检查更新」。
 
 ### 可选：私有期间用 token
 
