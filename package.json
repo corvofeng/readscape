@@ -9,6 +9,7 @@
     "check": "npm run build && node --check dist/readscape-nga.user.js && npm test",
     "new-adapter": "node scripts/new-adapter.mjs",
     "list": "node scripts/list-adapters.mjs",
+    "install-url": "node scripts/install-url.mjs",
     "dev": "node scripts/dev-server.mjs"
   },
   "devDependencies": {

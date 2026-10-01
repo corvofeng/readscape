@@ -45,6 +45,15 @@ test('首楼图集保留正文，引用和表格图片留在原处，分页切�
   } finally { dom.window.close(); }
 });
 
+test('正文图片用 data-nw/data-nh 预占位，加载前后尺寸一致', () => {
+  const { dom, root } = setup('<img src="/a.png" data-nw="640" data-nh="1407">');
+  try {
+    const frame = root.querySelector('.op .reader-image'), img = frame.querySelector('img');
+    assert.equal(img.width, 640); assert.equal(img.height, 1407);
+    assert.equal(frame.dataset.ratio, '640 / 1407');
+    assert.equal(frame.style.getPropertyValue('--image-ratio'), '640 / 1407', '加载前即按比例占位，避免布局跳动');
+  } finally { dom.window.close(); }
+});
 test('图片加载状态、失败重试和查看器键盘关闭及焦点恢复', () => {
   const { dom, root } = setup('<img src="/a.png" width="600" height="800"><img src="/b.png">');
   try {

@@ -37,7 +37,6 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   let items = [], tab = 'all', query = '', signature = '', timer;
   let cardObserver, listObserver;
   const listCards = new Map();
-  const coverURLs = new Set();
   let coverDisposed = false;
   let gateHandled = false, gateTimer;
   let modeToggle = toggle;
@@ -247,31 +246,32 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
 
   /* LIST_MODULE */
 
+  // 封面直接引用原图地址，由浏览器 HTTP 缓存承担复用；缓存只记录地址。
   function applyCachedCover(card, tid) {
-    if (!postCache || !window.URL.createObjectURL || card.coverLoading) return;
+    if (!postCache || card.coverLoading) return;
     card.coverLoading = true;
     const generation = postCache.generation;
     postCache.getCover(tid).then(cached => {
       if (!cached || coverDisposed || generation !== postCache.generation || !card.isConnected) return;
       const cover = card.querySelector('.cover');
       if (!cover || card.coverSource === cached.source) return;
-      const image = node('img'); image.alt = ''; image.decoding = 'async';
-      const url = window.URL.createObjectURL(cached.blob); coverURLs.add(url);
+      const image = node('img'); image.alt = ''; image.decoding = 'async'; image.loading = 'lazy';
+      // 已有比例时先占位，避免图片加载后卡片高度变化导致滚动中点击偏移。
+      if (cached.width > 0 && cached.height > 0) image.style.aspectRatio = `${cached.width} / ${cached.height}`;
       image.onload = () => {
-        if (coverDisposed || generation !== postCache.generation) { window.URL.revokeObjectURL(url); coverURLs.delete(url); return; }
-        const old = cover.querySelector('.cached-cover-image');
-        if (old) { window.URL.revokeObjectURL(old.src); coverURLs.delete(old.src); old.remove(); }
+        if (coverDisposed || generation !== postCache.generation) return;
+        cover.querySelector('.cached-cover-image')?.remove();
+        // 保留图片自身宽高比，瀑布流按实际高度排布；加载完成前用 3:4 占位。
+        if (image.naturalWidth > 0 && image.naturalHeight > 0) image.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
         image.className = 'cached-cover-image'; cover.prepend(image); cover.classList.add('cached-cover'); card.coverSource = cached.source;
       };
-      image.onerror = () => { window.URL.revokeObjectURL(url); coverURLs.delete(url); };
-      image.src = url;
+      image.src = cached.source;
     }).catch(() => {}).finally(() => { card.coverLoading = false; });
   }
   const unsubscribeCache = postCache?.subscribe(event => {
     if (event.type === 'cover') { const card = listCards.get(event.tid)?.card; if (card) applyCachedCover(card, event.tid); }
     if (event.type === 'clear') {
       for (const {card} of listCards.values()) { card.querySelector('.cached-cover-image')?.remove(); card.querySelector('.cover')?.classList.remove('cached-cover'); card.coverSource = null; }
-      for (const url of coverURLs) window.URL.revokeObjectURL(url); coverURLs.clear();
     }
     if (event.type === 'favorites') postCache.getFavorites().then(saved => {
       if (!saved || coverDisposed) return;
@@ -284,7 +284,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     for (const [tid,item] of Object.entries(saved)) if (!favoriteChanges.has(tid)) favorites[tid] = item;
     if (!app.classList.contains('reader') && items.length) render(false);
   });
-  window.addEventListener('pagehide', event => { if (event.persisted) return; coverDisposed = true; unsubscribeCache?.(); for (const url of coverURLs) window.URL.revokeObjectURL(url); coverURLs.clear(); });
+  window.addEventListener('pagehide', event => { if (event.persisted) return; coverDisposed = true; unsubscribeCache?.(); });
 
   function extract(doc = document, base = pageURL.href) {
     const result = [], seen = new Set();

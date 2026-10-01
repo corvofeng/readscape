@@ -1,7 +1,6 @@
   function startReader() {
     const tid = pageURL.searchParams.get('tid');
     postCache?.visit({ tid, url: pageURL.href });
-    const readerImageURLs = new Map();
     const pages = new Map(), records = new Map(), cards = new Map(), nextPages = new Map();
     let previousCards = new Map();
     let initialSignature = '', busy = false, ended = false, scanTimer, cursor;
@@ -184,10 +183,6 @@
       const replies = posts.map(p => { const {content,native,...record} = p; return {...record,html:content.outerHTML}; });
       postCache.saveReplyPage(tid,number,replies,{next,title:rtitle.textContent,url:canonical(number).href}).then(async stored => {
         if (!stored || generation !== postCache.generation || !await postCache.getReplyPage(tid,number)) return;
-        for (const p of posts) for (const img of p.content.querySelectorAll('img')) {
-          const u = safeURL(img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('src'),p.base);
-          if (u && !/smile|emotion/i.test(u.href) && !/smile/.test(img.className) && !/display\s*:\s*none/.test(img.getAttribute('style') || '')) postCache.saveImage(tid,u.href,{page:number,commentKey:p.key});
-        }
       });
     }
     function restorePage(cached) {
@@ -249,11 +244,12 @@
       const frame = node('span', 'reader-image is-loading'), attachment = link(url, '', 'attachment');
       attachment.setAttribute('aria-label', alt || '查看完整图片');
       const img = node('img'); img.alt = alt; img.decoding = 'async'; img.loading = interactive ? 'lazy' : 'eager'; img.referrerPolicy = 'same-origin';
-      const width = Number(source?.getAttribute('width')) || source?.naturalWidth;
-      const height = Number(source?.getAttribute('height')) || source?.naturalHeight;
+      const width = Number(source?.getAttribute('width')) || Number(source?.getAttribute('data-nw')) || source?.naturalWidth;
+      const height = Number(source?.getAttribute('height')) || Number(source?.getAttribute('data-nh')) || source?.naturalHeight;
       if (width > 0 && height > 0) {
         img.width = width; img.height = height;
         frame.style.setProperty('--image-ratio', `${width} / ${height}`);
+        frame.dataset.ratio = `${width} / ${height}`;
       }
       const state = node('span', 'image-state', '图片加载中…'); state.setAttribute('role', 'status');
       const retry = button('重新加载', 'image-retry', () => {
@@ -264,6 +260,7 @@
         if (!img.naturalWidth) return;
         frame.className = 'reader-image is-loaded'; state.textContent = ''; retry.hidden = true;
         frame.style.setProperty('--image-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
+        frame.dataset.ratio = `${img.naturalWidth} / ${img.naturalHeight}`;
       };
       img.addEventListener('load', loaded);
       img.addEventListener('error', () => {
@@ -277,12 +274,7 @@
           event.preventDefault(); closeViewer();
         }
       });
-      const generation = postCache?.generation;
-      if (postCache && window.URL.createObjectURL) postCache.getImage(tid,url).then(cached => {
-        if (!cached || coverDisposed || generation !== postCache.generation) { img.src=url; return; }
-        const objectURL=window.URL.createObjectURL(cached.blob); readerImageURLs.set(objectURL,{img,source:url}); img.src=objectURL;
-      }).catch(()=>{img.src=url;});
-      else img.src = url;
+      img.src = url;
       if (img.complete && img.naturalWidth) loaded();
       return frame;
     }
@@ -408,8 +400,18 @@
       if (parent) card.append(node('div', 'reply-rel', `回复 #${parent.floor ?? '?'} · ${parent.author}`));
       if (op) {
         const images = [...body.querySelectorAll('.reader-image')].filter(image => !image.closest('.quoted, table, details'));
-        const firstImage = [...body.querySelectorAll('.reader-image')].find(image => !image.closest('.quoted'))?.querySelector('.attachment');
-        if (firstImage) postCache?.saveCover(tid, firstImage.href, { title: rtitle.textContent, url: pageURL.href });
+        const firstFrame = [...body.querySelectorAll('.reader-image')].find(image => !image.closest('.quoted'));
+        const firstImage = firstFrame?.querySelector('.attachment');
+        if (firstImage) {
+          // 记下封面比例，列表可在图片加载前预占位，滚动时卡片高度不跳、点击命中稳定。
+          const sent = firstFrame.dataset.ratio || '';
+          const [coverW, coverH] = sent.split(' / ').map(Number);
+          postCache?.saveCover(tid, firstImage.href, { title: rtitle.textContent, url: pageURL.href, ...(coverW > 0 && coverH > 0 ? { coverW, coverH } : {}) });
+          firstFrame.querySelector('img')?.addEventListener('load', () => {
+            const img = firstFrame.querySelector('img'), ratio = `${img.naturalWidth} / ${img.naturalHeight}`;
+            if (img.naturalWidth > 0 && ratio !== sent) postCache?.saveCover(tid, firstImage.href, { coverW: img.naturalWidth, coverH: img.naturalHeight });
+          }, { once: true });
+        }
         if (images.length) { card.classList.add('has-gallery'); card.append(makeGallery(images)); }
         const copy = node('div', 'note-copy'); copy.append(node('h1', 'note-title', rtitle.textContent), body);
         card.append(copy, actions);
@@ -559,9 +561,5 @@
       const signature = userSignature();
       if (signature !== lastUsers) { lastUsers = signature; updateNative(); }
     }, 1200);
-    const unsubscribeImages = postCache?.subscribe(event => {
-      if (event.type !== 'clear') return;
-      for (const [url,{img,source}] of readerImageURLs) { if (img.isConnected) img.src=source; window.URL.revokeObjectURL(url); } readerImageURLs.clear();
-    });
-    window.addEventListener('pagehide', () => { unsubscribeImages?.(); for (const url of readerImageURLs.keys()) window.URL.revokeObjectURL(url); readerImageURLs.clear(); window.clearInterval(userRefresh); nativeObserver.disconnect(); clearTimeout(scanTimer); clearTimeout(gateTimer); });
+    window.addEventListener('pagehide', () => { window.clearInterval(userRefresh); nativeObserver.disconnect(); clearTimeout(scanTimer); clearTimeout(gateTimer); });
   }

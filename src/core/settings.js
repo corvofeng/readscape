@@ -50,7 +50,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
     const c = document.createElement(type === 'select' ? 'select' : 'input'); c.setAttribute('aria-label', label); c.dataset.pref = key;
     if (type === 'select') for (const [value, name] of options) { const opt = document.createElement('option'); opt.value = value; opt.textContent = name; c.append(opt); }
     else { c.type = type; if (type === 'checkbox') c.setAttribute('role', 'switch'); if (type === 'range') { c.min = '.85'; c.max = '1.4'; c.step = '.05'; } }
-    const update = () => { prefs[key] = type === 'checkbox' ? c.checked : type === 'range' || type === 'number' ? Number(c.value) : c.value; if (key === 'cacheMaxPosts' || key === 'cacheImageMB') prefs[key] = Math.max(key === 'cacheMaxPosts' ? 1 : 0, Math.min(500, Math.trunc(prefs[key]) || 0)); save(); sync(); apply(); configureCache(); change(); };
+    const update = () => { prefs[key] = type === 'checkbox' ? c.checked : type === 'range' || type === 'number' ? Number(c.value) : c.value; if (key === 'cacheMaxPosts') prefs[key] = Math.max(1, Math.min(500, Math.trunc(prefs[key]) || 0)); save(); sync(); apply(); configureCache(); change(); };
     c.addEventListener(type === 'range' ? 'input' : 'change', update); controls.set(key, c); wrap.append(text);
     if (type === 'range') { const group = document.createElement('span'); group.className = 'rt-range'; const value = document.createElement('output'); value.className = 'rt-scale'; value.setAttribute('aria-label', '当前字号'); group.append(c, value); wrap.append(group); } else wrap.append(c);
     target.append(wrap);
@@ -67,8 +67,8 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
   const cacheSection = document.createElement('section'); cacheSection.className = 'rt-cache'; cacheSection.hidden = !cache;
   const cacheUsage = document.createElement('p'); cacheUsage.className = 'rt-cache-usage'; cacheUsage.setAttribute('role', 'status'); cacheUsage.textContent = '正在统计缓存…';
   const cacheOptions = document.createElement('details'); const cacheTitle = document.createElement('summary'); cacheTitle.textContent = '缓存设置'; cacheOptions.append(cacheTitle);
-  row('本地缓存', 'cacheEnabled', 'checkbox', undefined, cacheOptions); row('帖子上限', 'cacheMaxPosts', 'number', undefined, cacheOptions); row('图片上限（MB）', 'cacheImageMB', 'number', undefined, cacheOptions);
-  for (const key of ['cacheMaxPosts','cacheImageMB']) { const input = controls.get(key); input.min = key === 'cacheMaxPosts' ? '1' : '0'; input.max = '500'; input.step = '1'; }
+  row('本地缓存', 'cacheEnabled', 'checkbox', undefined, cacheOptions); row('帖子上限', 'cacheMaxPosts', 'number', undefined, cacheOptions);
+  { const input = controls.get('cacheMaxPosts'); input.min = '1'; input.max = '500'; input.step = '1'; }
   const clearCache = document.createElement('button'); clearCache.type = 'button'; clearCache.className = 'rt-clear-cache'; clearCache.textContent = '清理缓存';
   const cacheNote = document.createElement('p'); cacheNote.className = 'rt-note'; cacheNote.textContent = '7 天未访问自动清理。手动清理保留收藏书签和阅读设置。';
   cacheSection.append(cacheUsage, clearCache, cacheOptions, cacheNote); sheet.append(cacheSection);
@@ -80,9 +80,9 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
     if (version !== cacheVersion || clearingCache) return;
     if (!used.available) { cacheUsage.textContent = '本地缓存不可用，仍可正常阅读。'; clearCache.disabled = true; return; }
     clearCache.disabled = false;
-    cacheUsage.textContent = `缓存估算 ${formatBytes(used.totalBytes)} · 帖子 ${used.posts}/${used.maxPosts} · 回复 ${used.replyPages} 页 · 图片 ${formatBytes(used.imageBytes)}/${formatBytes(used.maxImageBytes)}${used.enabled ? '' : ' · 缓存已关闭'}`;
+    cacheUsage.textContent = `缓存估算 ${formatBytes(used.totalBytes)} · 帖子 ${used.posts}/${used.maxPosts} · 回复 ${used.replyPages} 页${used.enabled ? '' : ' · 缓存已关闭'}`;
   }
-  function configureCache() { cache?.configure({enabled:prefs.cacheEnabled !== false,maxPosts:prefs.cacheMaxPosts ?? 500,imageMB:prefs.cacheImageMB ?? 500}).then(refreshCache); }
+  function configureCache() { cache?.configure({enabled:prefs.cacheEnabled !== false,maxPosts:prefs.cacheMaxPosts ?? 500}).then(refreshCache); }
   clearCache.onclick = async () => {
     if (clearingCache) return; clearingCache = true; cacheVersion++; clearCache.disabled = true; cacheUsage.textContent = '正在清理缓存…';
     const cleared = await cache.clear(); clearingCache = false;
@@ -91,7 +91,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
   let cacheRefreshTimer;
   const unsubscribeCache = cache?.subscribe(() => { if (!mask.hidden) { context.clearTimeout(cacheRefreshTimer); cacheRefreshTimer=context.setTimeout(refreshCache,80); } });
   context.addEventListener('pagehide', () => { unsubscribeCache?.(); context.clearTimeout(cacheRefreshTimer); });
-  function sync() { for (const [key,c] of controls) { if (c.type === 'checkbox') c.checked = ['smoothNavigation','cacheEnabled'].includes(key) ? prefs[key] !== false : !!prefs[key]; else c.value = prefs[key] ?? ({fontScale:1,font:'system',theme:'light',cacheMaxPosts:500,cacheImageMB:500}[key]); } sheet.querySelector('.rt-scale').textContent = `${Math.round(Number(controls.get('fontScale').value) * 100)}%`; }
+  function sync() { for (const [key,c] of controls) { if (c.type === 'checkbox') c.checked = ['smoothNavigation','cacheEnabled'].includes(key) ? prefs[key] !== false : !!prefs[key]; else c.value = prefs[key] ?? ({fontScale:1,font:'system',theme:'light',cacheMaxPosts:500}[key]); } sheet.querySelector('.rt-scale').textContent = `${Math.round(Number(controls.get('fontScale').value) * 100)}%`; }
   const account = document.createElement('button'); account.className = 'rt-account'; account.textContent = '登录'; account.onclick = () => { hide(true, true); login?.(account); }; if (login) header.insertBefore(account, close);
   let opener = fab, sheetAnimation, animationVersion = 0, closing = false;
   const measurePanel = () => app.style.setProperty('--rt-panel-height', `${Math.ceil(sheet.getBoundingClientRect().height)}px`);
@@ -133,7 +133,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
   fab.onclick = () => open();
   mask.addEventListener('cancel', event => { event.preventDefault(); hide(); });
   close.onclick = () => hide(); native.onclick = () => { hide(true, true); original(); };
-  reset.onclick = () => { Object.assign(prefs,{fontScale:1,font:'system',theme:'light',single:false,groupReplies:false,smoothNavigation:true,cacheEnabled:true,cacheMaxPosts:500,cacheImageMB:500}); save(); sync(); apply(); configureCache(); change(); };
+  reset.onclick = () => { Object.assign(prefs,{fontScale:1,font:'system',theme:'light',single:false,groupReplies:false,smoothNavigation:true,cacheEnabled:true,cacheMaxPosts:500}); save(); sync(); apply(); configureCache(); change(); };
   mask.onclick = e => { if (e.target === mask) hide(); };
   mask.addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hide(); }

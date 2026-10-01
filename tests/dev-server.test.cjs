@@ -65,9 +65,9 @@ test('development HTTP install, rebuild, build failure and recovery', { timeout:
   assert.equal(reloads, 1);
   const release = await (await fetchPath('/readscape-nga.user.js')).text();
   assert.ok(release.includes(`// @updateURL    ${base}/readscape-nga.user.js`));
-  assert.ok(release.includes('// @grant        GM_xmlhttpRequest'));
-  assert.ok(release.includes('// @connect      img.nga.cn'));
-  assert.ok(!release.includes(`// @connect      ${new URL(base).hostname}`),'正式版只连接图片服务，不包含开发服务的权限');
+  assert.ok(!release.includes('// @grant        GM_xmlhttpRequest'),'图片直连浏览器缓存，正式版不再申请跨域下载权限');
+  assert.ok(!release.includes('// @connect      img.nga.cn'),'图片直连浏览器缓存，正式版不再声明图片连接');
+  assert.ok(!release.includes(`// @connect      ${new URL(base).hostname}`),'正式版不包含开发服务的连接权限');
   assert.equal((await fetchPath('/package.json')).status, 404);
   assert.equal((await fetch(base, { method: 'POST' })).status, 405);
   const before = await (await fetchPath('/__readscape/bundle')).json();
