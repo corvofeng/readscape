@@ -1,7 +1,7 @@
 #!/bin/bash
 # 启动油猴调试浏览器（Chrome for Testing + Tampermonkey，独立 profile）
 # 用法: scripts/dev-browser.sh [http://主机:9222]，或设置 CDP_URL
-# 首次使用前的准备见 README「油猴联调」一节。
+# 首次使用前的准备见 docs/development.md「油猴联调」一节。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
