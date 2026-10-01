@@ -78,35 +78,40 @@ GitHub Actions（`.github/workflows/ci-cd.yml`）负责持续集成与发布：
 - **`publish`**：向 `main` 推送（或手动触发）时，构建脚本并强制推送到一个独立的 **`dist` 孤儿分支**（仓库根目录下的 `readscape-<id>.user.js`）。这个分支只放构建产物，与源码分离，提供稳定的 raw 更新地址。
 - **Release**：推送 `v*` 标签时额外创建 GitHub Release，附上**不含 token** 的脚本，便于手动下载安装。
 
-构建器为每个脚本写入 `@updateURL` / `@downloadURL`（外加 `@homepageURL` / `@supportURL`），指向 `dist` 分支的 raw 地址。油猴会定期比对 `@updateURL` 里的 `@version`，发现更高版本就从 `@downloadURL` 下载并替换脚本，从而实现自动更新。
+构建器为每个脚本写入 `@updateURL` / `@downloadURL`（外加 `@homepageURL` / `@supportURL`），指向 `dist` 分支的 raw 地址：
 
-### 私有仓库与 token
+```
+https://raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga.user.js
+```
 
-本仓库为 **private**。油猴检查更新时不带任何凭证，直接访问私有仓库的 raw 地址会返回 404。经验证，把只读 token 内嵌到 URL 的 userinfo 即可正常拉取：
+油猴会定期比对 `@updateURL` 里的 `@version`，发现更高版本就从 `@downloadURL` 下载并替换脚本，从而实现自动更新。
+
+### 安装（仓库公开后，零配置）
+
+本项目会开源。仓库为 **public** 后，raw 地址无需任何凭证即可访问，上面的更新地址开箱即用：
+
+```sh
+# 打印各适配器的安装地址（也可加 -- nga 只看 NGA）
+npm run install-url
+```
+
+把打印出的 raw 地址粘贴到浏览器即可触发油猴安装；之后提高 `package.json` 版本并推送到 `main`，CI 会更新 `dist` 分支，油猴据此自动检查并安装新版本。也可在油猴里手动「检查更新」。
+
+### 可选：私有期间用 token
+
+在仓库转为 public 之前，它是 **private** 的，油猴检查更新不带凭证、访问私有 raw 地址会返回 404。经验证，把只读 token 内嵌到 URL 的 userinfo 即可拉取：
 
 ```
 https://<TOKEN>@raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga.user.js
 ```
 
-因为油猴更新后会用新脚本的元数据覆盖旧元数据，token 必须存在于**被下载的文件里**，而不能只写在 `main` 源码中。做法是：`main` 源码保持不含 token，CI 在发布时从 Actions Secret 注入 token，只写入 `dist` 分支的产物。
-
-配置步骤：
+因为油猴更新后会用新脚本的元数据覆盖旧元数据，token 必须存在于**被下载的文件里**，而不能只写在 `main` 源码中。做法是：`main` 源码保持不含 token，CI 在发布时从 Actions Secret 注入 token，只写入 `dist` 分支的产物（已用一次性 dummy token 验证注入链路，验证后已清除）。若要在私有期间启用：
 
 1. 在 GitHub 生成一个 **fine-grained Personal Access Token**，仅对本仓库授权、权限设为 **Contents: Read-only**（最小化泄露影响）。
 2. 到仓库 `Settings → Secrets and variables → Actions` 新建 secret，名字为 `READSCAPE_UPDATE_TOKEN`，值为上面的 token。
-3. 重新运行一次 `publish`（向 `main` 推送或在 Actions 里手动 `Run workflow`）。此后 `dist` 分支的脚本就带有 token，可自动更新。未配置该 secret 时，产物降级为不含 token（私有仓库下无法自动更新，CI 会给出 warning）。
+3. 重新运行一次 `publish`（向 `main` 推送或在 Actions 里手动 `Run workflow`）。此后 `dist` 分支的脚本就带有 token，可自动更新。未配置该 secret 时，产物为不含 token 版本（正是公开仓库需要的形态）。
 
-### 首次安装（私有仓库）
-
-本地执行下面的命令，它会用 `gh auth token`（或 `READSCAPE_UPDATE_TOKEN` / `GH_TOKEN`）拼出带 token 的安装地址：
-
-```sh
-npm run install-url            # 打印所有适配器的安装地址
-npm run install-url -- nga     # 只打印 NGA
-READSCAPE_OPEN=1 npm run install-url   # 打印并在浏览器打开（触发油猴安装）
-```
-
-把地址粘贴到浏览器即可触发油猴安装。安装后脚本内的 `@updateURL` / `@downloadURL` 已含 token，之后由油猴自动检查更新。token 不会被写入仓库任何文件。
+`npm run install-url` 会自动读取 `READSCAPE_UPDATE_TOKEN` / `GH_TOKEN` / `gh auth token`：私有期间打印带 token 的地址，公开后打印纯 raw 地址。token 不会被写入仓库任何文件。
 
 > 提示：`npm run check` 的测试偶尔会因异步时序出现单次抖动（重跑即通过）；CI 若因个别用例偶发失败，可重新运行 workflow。
 
