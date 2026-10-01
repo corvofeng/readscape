@@ -258,14 +258,13 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
       const image = node('img'); image.alt = ''; image.decoding = 'async'; image.loading = 'lazy';
       // 已有比例时先占位，避免图片加载后卡片高度变化导致滚动中点击偏移。
       if (cached.width > 0 && cached.height > 0) image.style.aspectRatio = `${cached.width} / ${cached.height}`;
-      image.onload = () => {
-        if (coverDisposed || generation !== postCache.generation) return;
-        cover.querySelector('.cached-cover-image')?.remove();
-        // 保留图片自身宽高比，瀑布流按实际高度排布；加载完成前用 3:4 占位。
-        if (image.naturalWidth > 0 && image.naturalHeight > 0) image.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
-        image.className = 'cached-cover-image'; cover.prepend(image); cover.classList.add('cached-cover'); card.coverSource = cached.source;
-      };
+      // 立即入树：lazy 图片脱离文档不会触发加载；比例已占位，加载前后布局不变。
+      image.className = 'cached-cover-image';
+      image.onerror = () => { image.remove(); cover.classList.remove('cached-cover'); card.coverSource = null; };
+      cover.querySelector('.cached-cover-image')?.remove();
+      cover.prepend(image); cover.classList.add('cached-cover'); card.coverSource = cached.source;
       image.src = cached.source;
+      if (image.naturalWidth > 0 && image.naturalHeight > 0 && !image.style.aspectRatio) image.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
     }).catch(() => {}).finally(() => { card.coverLoading = false; });
   }
   const unsubscribeCache = postCache?.subscribe(event => {
