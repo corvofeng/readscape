@@ -6,13 +6,13 @@
 
 | PC 列表 | PC 阅读 |
 | --- | --- |
-| ![PC 列表](docs/media/pc-list.png) | ![PC 阅读](docs/media/pc-reader.png) |
+| ![PC 列表](https://github.com/user-attachments/assets/4f77c848-26ca-4c70-a057-409ea29f8f2b) | ![PC 阅读](https://github.com/user-attachments/assets/dc7edc0e-c7fc-4ccf-a4a7-b758c57ee57b) |
 
 | 手机列表 | 手机阅读 |
 | --- | --- |
-| ![手机列表](docs/media/mobile-list.png) | ![手机阅读](docs/media/mobile-reader.png) |
+| ![手机列表](https://github.com/user-attachments/assets/be28a8a6-71e0-4492-9a62-b2f7f55a8e69) | ![手机阅读](https://github.com/user-attachments/assets/4865acaf-cb1b-4de5-866c-1d90840e3649) |
 
-列表为瀑布流卡片：封面按图片自身比例显示，标签与标题在图片下方；阅读为首楼图文笔记 + 逐页评论。13 秒演示视频见 [docs/media/readscape-cover-demo.mp4](docs/media/readscape-cover-demo.mp4)（列表 → 滚动 → 点击 → 阅读 → 返回）。
+列表为瀑布流卡片：封面按图片自身比例显示，标签与标题在图片下方；阅读为首楼图文笔记 + 逐页评论。13 秒演示视频见 [issue #1](https://github.com/corvofeng/readscape/issues/1)（列表 → 滚动 → 点击 → 阅读 → 返回）。预览图与视频统一托管在 issue #1，仓库不保存媒体副本。
 
 ## 安装
 
