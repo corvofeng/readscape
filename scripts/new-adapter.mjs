@@ -1,0 +1,11 @@
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const [id,host] = process.argv.slice(2);
+if (!/^[a-z][a-z0-9-]*$/.test(id || '') || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host || '')) throw new Error('Usage: npm run new-adapter -- example example.com');
+const dir = resolve(dirname(fileURLToPath(import.meta.url)),`../src/adapters/${id}`);
+if (existsSync(dir)) throw new Error('Adapter already exists; no files overwritten.');
+mkdirSync(dir,{recursive:true});
+writeFileSync(`${dir}/manifest.json`,JSON.stringify({id,name:`阅境 · ${id}`,namespace:`readscape-${id}`,description:'阅境（Readscape）的网站阅读适配器，待实现。',category:'other',storageKey:`reader-${id}-v1`,hosts:[host],paths:['/'],modules:{},styles:{}},null,2)+'\n');
+writeFileSync(`${dir}/index.js`, `function runAdapter({ navigation }) {\n  // TODO: 实现该网站的列表/正文解析、阅读界面，完成后调用 navigation.finish()。\n  // 公共设置可调用 mountSettings({shadow, app, prefs, save, change, original})。\n  navigation.finish();\n}\n`);
+console.log(`Created src/adapters/${id}; edit paths and parsing before building.`);

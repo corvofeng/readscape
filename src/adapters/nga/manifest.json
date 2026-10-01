@@ -1,0 +1,25 @@
+{
+  "id": "nga",
+  "name": "阅境 · NGA",
+  "namespace": "nga-cards-local",
+  "description": "阅境（Readscape）的 NGA 阅读适配器：卡片列表、正文与回复阅读、字体配色设置、手机布局和原生跳转过渡。",
+  "category": "forum",
+  "storageKey": "nga-cards-v1",
+  "hosts": [
+    "bbs.nga.cn",
+    "nga.178.com",
+    "ngabbs.com",
+    "bbs.ngacn.cc"
+  ],
+  "paths": [
+    "/thread.php",
+    "/read.php"
+  ],
+  "modules": {
+    "READER_MODULE": "reader.js"
+  },
+  "styles": {
+    "LIST_CSS": "list.css",
+    "READER_CSS": "reader.css"
+  }
+}
