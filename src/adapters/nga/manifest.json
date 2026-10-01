@@ -16,7 +16,11 @@
     "/read.php"
   ],
   "modules": {
-    "READER_MODULE": "reader.js"
+    "LIST_MODULE": "list.js",
+    "READER_MODULE": "reader.js",
+    "ACCOUNT_MODULE": "account.js",
+    "PROFILE_MODULE": "profile.js",
+    "BBCODE_MODULE": "bbcode.js"
   },
   "styles": {
     "LIST_CSS": "list.css",

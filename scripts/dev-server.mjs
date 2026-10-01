@@ -71,7 +71,7 @@ function loader() {
     try {
       if (!running) {
         const payload = await request('/__readscape/bundle');
-        new Function('GM_registerMenuCommand', payload.code)(GM_registerMenuCommand);
+        new Function('GM_registerMenuCommand', 'unsafeWindow', 'GM_xmlhttpRequest', payload.code)(GM_registerMenuCommand, typeof unsafeWindow !== 'undefined' ? unsafeWindow : window, GM_xmlhttpRequest);
         revision = payload.revision;
         running = true;
         console.info('[readscape dev] 已加载', revision);
