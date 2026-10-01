@@ -246,6 +246,15 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
 
   /* LIST_MODULE */
 
+  // masonry 以固定 4px 行高近似卡片高度。封面等异步内容改变高度后必须立即重算，
+  // 否则预留行数偏小，卡片会与下方卡片重叠，导致点击命中错误的帖子。
+  // ResizeObserver 对"应用缓存封面后再入树"的异步增高并不可靠，故显式调用。
+  function sizeCard(card) {
+    if (!card?.isConnected || !grid.classList.contains('masonry')) return;
+    const height = card.getBoundingClientRect().height;
+    if (height > 0) card.style.gridRowEnd = `span ${Math.max(1, Math.ceil((height + 18) / 4))}`;
+  }
+
   // 封面直接引用原图地址，由浏览器 HTTP 缓存承担复用；缓存只记录地址。
   function applyCachedCover(card, tid) {
     if (!postCache || card.coverLoading) return;
@@ -260,11 +269,15 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
       if (cached.width > 0 && cached.height > 0) image.style.aspectRatio = `${cached.width} / ${cached.height}`;
       // 立即入树：lazy 图片脱离文档不会触发加载；比例已占位，加载前后布局不变。
       image.className = 'cached-cover-image';
-      image.onerror = () => { image.remove(); cover.classList.remove('cached-cover'); card.coverSource = null; };
+      image.onerror = () => { image.remove(); cover.classList.remove('cached-cover'); card.coverSource = null; sizeCard(card); };
+      // 无占位比例时图片加载完才增高，加载后补算一次跨度。
+      image.addEventListener('load', () => sizeCard(card), { once: true });
       cover.querySelector('.cached-cover-image')?.remove();
       cover.prepend(image); cover.classList.add('cached-cover'); card.coverSource = cached.source;
       image.src = cached.source;
       if (image.naturalWidth > 0 && image.naturalHeight > 0 && !image.style.aspectRatio) image.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+      // 占位比例已确定高度，立即重算跨度，避免与下方卡片重叠。
+      sizeCard(card);
     }).catch(() => {}).finally(() => { card.coverLoading = false; });
   }
   const unsubscribeCache = postCache?.subscribe(event => {
@@ -382,13 +395,10 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     // 保留 DOM 中的原站顺序，按实际高度跨网格行，避免短卡片下方留白。
     if (typeof window.ResizeObserver === 'function') {
       cardObserver ||= new window.ResizeObserver(entries => {
-        for (const { target } of entries) {
-          const span = Math.ceil((target.getBoundingClientRect().height + 18) / 4);
-          target.style.gridRowEnd = `span ${Math.max(1, span)}`;
-        }
+        for (const { target } of entries) sizeCard(target);
       });
       grid.classList.add('masonry');
-      for (const card of grid.children) cardObserver.observe(card);
+      for (const card of grid.children) { sizeCard(card); cardObserver.observe(card); }
     }
     updateListControls();
   }
