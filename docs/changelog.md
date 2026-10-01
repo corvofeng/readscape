@@ -1,5 +1,13 @@
 # 变更历史
 
+## v3.0.1
+
+- 列表封面改为立即入树并按已记录比例（`posts.coverW/coverH`）占位：修复脱离文档的 lazy 图片不触发加载导致真实浏览器封面不显示，以及图片加载后卡片高度跳变、滚动中点击命偏的问题。
+- 封面异步增高后显式重算 masonry 行跨度，避免卡片重叠导致点错帖。
+- 封面登记增加同步 pending 日志：页面在 IndexedDB 提交前被刷新/关闭时，下次加载自动回填，不再丢封面。
+- CI 调整：`dist` 分支与 Release 仅在推送 `v*` 标签时更新，普通 `main` 推送只跑 verify。
+- README 精简为使用 / 预览 / 下载调试，技术细节移入 `docs/features.md`、`docs/changelog.md`、`docs/architecture.md`、`docs/development.md`；展示媒体改由 issue #1 托管。
+
 ## v3.0
 
 - 列表封面与正文图片不再下载入库：只记录原图地址，图片交给浏览器 HTTP 缓存，去掉图片 Blob 存储、配额与下载权限（`GM_xmlhttpRequest` / `@connect`）。已安装的正式版重新安装后生效。
