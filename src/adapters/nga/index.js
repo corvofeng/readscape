@@ -114,6 +114,29 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     const b = button(label, '', () => { tab = id; render(); }); b.dataset.tab = id; b.setAttribute('role', 'tab'); tabs.append(b);
   }
   const grid = node('section', 'grid'); grid.setAttribute('aria-label', '帖子卡片');
+  // 瀑布流的行高由脚本按卡片实测高度后补，且封面套用、翻页追加、卡片替换都会让
+  // 布局在点击前后发生位移（甚至触发滚动锚点跳动）。浏览器把 click 派发给"抬手时
+  // 恰好位于指尖下"的卡片，于是可能打开与按下时不同的帖子。这里记住按下的卡片，
+  // 若抬手时命中的是另一张，就纠正为按下时那张的目标，保证"点谁开谁"。
+  let pressedCard = null, pressedAt = 0;
+  grid.addEventListener('pointerdown', event => {
+    pressedCard = event.target.closest?.('.card') || null; pressedAt = Date.now();
+  }, true);
+  grid.addEventListener('pointercancel', () => { pressedCard = null; }, true);
+  grid.addEventListener('click', event => {
+    const cover = event.target.closest?.('.cover');
+    if (!cover || !pressedCard) return;
+    const clicked = event.target.closest('.card');
+    const stale = pressedCard; pressedCard = null;
+    if (clicked === stale || event.defaultPrevented) return;
+    if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (Date.now() - pressedAt > 1500) return;
+    const url = stale.querySelector('.cover')?.href;
+    if (!url) return;
+    // 指尖下的卡片已因布局位移换人：拦截默认跳转，改开按下时看到的那张。
+    event.preventDefault(); event.stopPropagation();
+    window.location.href = url;
+  }, true);
   const empty = node('div', 'empty'), pager = node('nav', 'pager'); pager.setAttribute('aria-label', '论坛分页');
   main.append(intro, tabs, grid, empty, pager, node('div', 'foot', '按原站顺序追加 · 热议为已加载帖子回复 ≥ 100 · 收藏仅存本浏览器'));
   app.append(top, main);
@@ -252,7 +275,9 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   function sizeCard(card) {
     if (!card?.isConnected || !grid.classList.contains('masonry')) return;
     const height = card.getBoundingClientRect().height;
-    if (height > 0) card.style.gridRowEnd = `span ${Math.max(1, Math.ceil((height + 18) / 4))}`;
+    if (height <= 0) return;
+    const span = `span ${Math.max(1, Math.ceil((height + 18) / 4))}`;
+    if (card.style.gridRowEnd !== span) card.style.gridRowEnd = span;
   }
 
   // 封面直接引用原图地址，由浏览器 HTTP 缓存承担复用；缓存只记录地址。
