@@ -41,7 +41,10 @@ jobs:
   publish:
     name: 发布到 dist 分支
     needs: verify
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/tags/v')
+    concurrency:
+      group: readscape-dist-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,33 +66,32 @@ jobs:
           if [ -z "$READSCAPE_UPDATE_TOKEN" ]; then
             echo "::warning::未配置 secrets.READSCAPE_UPDATE_TOKEN，dist 分支产物不含 token，私有仓库将无法自动更新。"
           fi
-          rm -rf /tmp/publish && mkdir -p /tmp/publish
-          cp dist/*.user.js /tmp/publish/
+      - name: 构建固定版本 (禁用自动更新)
+        run: npm run build -- --fixed
 
-      - name: 推送到 dist 分支 (orphan)
+      - name: 检出独立产物分支
+        uses: actions/checkout@v4
+        with:
+          ref: dist
+          path: .publish
+
+      - name: 保留版本目录并发布到 dist 分支
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          cd /tmp/publish
-          git init -q
-          git checkout -q -b dist
+          node scripts/publish-dist.mjs .publish dist "$RELEASE_TAG"
+          cd .publish
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -q -m "chore(dist): build ${GITHUB_SHA::7} [skip ci]" || echo "无变化，跳过提交"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin dist
-
-      # 2) 构建「不含 token」版本用于 GitHub Release 资产，避免在可下载资产中泄露 token。
-      - name: 构建 Release 产物 (无 token)
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          unset READSCAPE_UPDATE_TOKEN
-          npm run build
+          if ! git diff --cached --quiet; then
+            git commit -q -m "chore(dist): publish $RELEASE_TAG [skip ci]"
+            git push origin HEAD:dist
+          fi
 
       - name: 创建 GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.user.js
+          files: dist/${{ github.ref_name }}/*.user.js
           generate_release_notes: true

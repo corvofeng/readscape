@@ -13,15 +13,15 @@ npm run build -- nga
 npm run list
 ```
 
-`npm run build` 构建全部适配器，`npm run build -- nga` 只构建 NGA。产物位于 `dist/`。编辑 `src/` 后重新构建；不要修改产物，否则下次构建会覆盖。
+`npm run build` 构建全部适配器，`npm run build -- nga` 只构建 NGA。产物位于本地 `dist/`，已由 `.gitignore` 排除；`main` 和源码版本标签的历史均不保存产物。`npm run build -- --fixed` 额外生成 `dist/v<package.json 版本>/` 的固定版。编辑 `src/` 后重新构建；不要修改产物，否则下次构建会覆盖。
 
 ## CI/CD 与油猴自动更新
 
 GitHub Actions（`.github/workflows/ci-cd.yml`）负责持续集成与发布：
 
 - **`verify`**：向 `main` 推送或提 PR 时运行 `npm ci && npm run check`（构建 + `node --check` 语法检查 + 全部测试），并把 `dist/*.user.js` 作为构建产物上传。
-- **`publish`**：推送 `v*` 标签时（普通 `main` 推送只跑 verify，不更新 dist），构建脚本并强制推送到一个独立的 **`dist` 孤儿分支**（仓库根目录下的 `readscape-<id>.user.js`）。这个分支只放构建产物，与源码分离，提供稳定的 raw 更新地址。
-- **Release**：同一个 `v*` 标签额外创建 GitHub Release，附上**不含 token** 的脚本，便于手动下载安装。
+- **`publish`**：推送 `v*` 标签时（普通 `main` 推送只跑 verify，不更新 dist），在独立的 **`dist` 分支**追加提交，保留已有版本目录。根目录的 `readscape-<id>.user.js` 提供自动更新；`v<版本>/readscape-<id>.user.js` 提供固定安装。重新发布相同标签时只允许相同文件，内容不同则失败；补发旧标签不会把根目录脚本降级。标签必须与 `package.json` 和脚本版本一致。发布任务串行执行，通过普通推送保留产物历史。
+- **Release**：新发布的 `v*` 标签额外创建 GitHub Release，附上**不含 token、禁用自动更新**的固定版脚本。原有 Release 附件保持原样，旧版的固定脚本可从 dist 版本目录安装。
 
 构建器为每个脚本写入 `@updateURL` / `@downloadURL`（外加 `@homepageURL` / `@supportURL`），指向 `dist` 分支的 raw 地址：
 
@@ -30,6 +30,8 @@ https://raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga.user.js
 ```
 
 油猴会定期比对 `@updateURL` 里的 `@version`，发现更高版本就从 `@downloadURL` 下载并替换脚本，从而实现自动更新。
+
+固定版安装地址示例：`https://raw.githubusercontent.com/corvofeng/readscape/dist/v3.0.2/readscape-nga.user.js`。固定版将 `@updateURL` 和 `@downloadURL` 设为 `none`，禁用更新检查（见 [Tampermonkey 元数据说明](https://www.tampermonkey.net/documentation.php?q=update_url)）；需要升级时自行安装其他版本。后续发布不会改写已有版本目录。
 
 ### 安装（仓库公开后，零配置）
 
@@ -54,7 +56,7 @@ https://<TOKEN>@raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga
 
 1. 在 GitHub 生成一个 **fine-grained Personal Access Token**，仅对本仓库授权、权限设为 **Contents: Read-only**（最小化泄露影响）。
 2. 到仓库 `Settings → Secrets and variables → Actions` 新建 secret，名字为 `READSCAPE_UPDATE_TOKEN`，值为上面的 token。
-3. 重新运行一次 `publish`（向 `main` 推送或在 Actions 里手动 `Run workflow`）。此后 `dist` 分支的脚本就带有 token，可自动更新。未配置该 secret 时，产物为不含 token 版本（正是公开仓库需要的形态）。
+3. 发布一个新版本标签，或在 Actions 里选择版本标签手动 `Run workflow`。此后 `dist` 分支根目录的脚本就带有 token，可自动更新；固定版本目录和 Release 附件不含 token。未配置该 secret 时，产物为不含 token 版本（正是公开仓库需要的形态）。
 
 `npm run install-url` 会自动读取 `READSCAPE_UPDATE_TOKEN` / `GH_TOKEN` / `gh auth token`：私有期间打印带 token 的地址，公开后打印纯 raw 地址。token 不会被写入仓库任何文件。
 

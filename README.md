@@ -17,7 +17,8 @@
 ## 安装
 
 - **仓库公开后（零配置）**：运行 `npm run install-url` 打印 raw 安装地址，粘贴到浏览器即触发油猴安装；之后提高版本并推送 `v*` 标签，油猴按 `@updateURL` 自动检查更新（只有打 tag 才会更新 `dist` 分支）。
-- **手动安装**：使用仓库内的 `dist/readscape-nga.user.js`，或从安装包解压 `readscape-nga.user.js`；在油猴里新建脚本并完整替换代码后保存、刷新网页。更新已有脚本时请在原脚本内替换代码。
+- **固定版本**：从 [dist 分支](https://github.com/corvofeng/readscape/tree/dist) 的 `v<版本>/readscape-nga.user.js` 安装，或下载新版 [Release](https://github.com/corvofeng/readscape/releases) 附件。固定版禁用自动更新，每个版本目录只发布一次。`v3.0.0`–`v3.0.2` 也已补齐固定版本目录。
+- **手动安装**：下载脚本后，在油猴里新建脚本并完整替换代码后保存、刷新网页。更新已有脚本时请在原脚本内替换代码。
 - 不要同时启用两个 NGA 阅读脚本。脚本显示名称为「阅境 · NGA」。
 
 ## 使用
@@ -30,7 +31,7 @@
 
 ## 下载与调试
 
-- **正式版**：`dist/readscape-nga.user.js`，或 CI 发布到 `dist` 分支的 raw 地址（见 [开发指南](docs/development.md#cicd-与油猴自动更新)）。
+- **正式版**：产物集中在独立的 `dist` 分支，根目录脚本跟随最新版本，版本目录脚本保持固定；`main` 只保存源码。本地 `npm run build` 生成的 `dist/` 已忽略（见 [开发指南](docs/development.md#cicd-与油猴自动更新)）。
 - **开发自动刷新**：`npm run dev` 后打开服务首页，点击“安装 / 更新开发脚本”；修改 `src/` 自动重新构建并刷新已打开的 NGA 页面。
 - **远端浏览器联调**：`scripts/dev-browser.sh <CDP地址>` 检查浏览器，`CDP_URL=... node scripts/verify-tm.mjs` 新开页面验证并截图。
 - **构建与测试**：`npm ci && npm run check`（构建 + 语法检查 + 全部回归测试）。
