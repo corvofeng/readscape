@@ -45,7 +45,14 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
   assert.equal(root.querySelector('.grid').classList.contains('single'),true);
   const r=w.document.querySelector('#topicrows tr:last-child').cloneNode(true);
   r.querySelector('.topic').href='/read.php?tid=999';r.querySelector('.topic').textContent='晚到的动态帖子';
+  let confirmList;
+  w.fetch=async(url,options)=>{
+    fetches++;assert.equal(new URL(url).pathname,'/thread.php');assert.equal(options.cache,'no-cache');
+    return new Promise(resolve=>{confirmList=()=>resolve({ok:true,url,headers:{get:()=>''},arrayBuffer:async()=>new TextEncoder().encode(w.document.documentElement.outerHTML).buffer});});
+  };
   w.document.querySelector('#topicrows').append(r);await sleep(300);assert.equal(cards().length,8);
+  assert.equal(fetches,1);assert(root.querySelector('.list-refresh').hidden,'实际请求完成前不提示新内容');
+  confirmList();await sleep(25);assert.equal(root.querySelector('.list-refresh').hidden,false);
   click('.list-refresh');assert.equal(cards().length,9);
   w.close();
   // 使用观察到的访客页原生链接结构，确认一次页面只点击一次且跨页计数。

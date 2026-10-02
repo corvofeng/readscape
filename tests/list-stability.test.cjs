@@ -117,6 +117,47 @@ async function seeded() {
   await cache.saveListPages(url, new Map([[1, { url, items, next: null }]]));
   cache.close(); seed.w.close(); return factory;
 }
+test('startup checks the network before announcing changes and ignores time, order and pagination alone', async () => {
+  const factory = new IDBFactory(), seed = await setup({ factory });
+  await tick(); seed.w.close();
+  let finish, calls = 0, options;
+  const { w, root } = await setup({ factory, fetcher: (url, init) => {
+    calls++; options = init;
+    return new Promise(resolve => { finish = () => {
+      const html = '<script>var __PAGE = {1:0,2:1,3:35};</script><table>' + [4,3,2,1].map(id => `<tr><td class="c2"><a class="topic" href="/read.php?tid=${id}">帖子 ${id}</a></td><td>2 分钟前</td></tr>`).join('') + '</table>';
+      resolve({ ok: true, url, headers: { get: () => '' }, arrayBuffer: async () => new TextEncoder().encode(html).buffer });
+    }; });
+  } });
+  try {
+    assert.equal(calls, 1); assert.equal(options.cache, 'no-cache');
+    assert.equal(root.querySelector('.list-refresh').hidden, true);
+    assert(!root.querySelector('.list-refresh-bar').classList.contains('has-update'));
+    finish(); await tick();
+    assert.equal(root.querySelector('.list-refresh-status').textContent, '列表已是最新');
+    assert.equal(root.querySelector('.list-refresh').hidden, true);
+    assert(root.querySelector('.list-load').hidden);
+    assert.deepEqual([...root.querySelectorAll('.card')].map(card => card.dataset.tid), ['1','2','3','4']);
+  } finally { w.close(); }
+});
+test('native DOM changes after interaction must be confirmed by a request', async () => {
+  let calls = 0, finish;
+  const { w, root } = await setup({ fetcher: url => {
+    calls++;
+    return new Promise(resolve => { finish = () => {
+      const html = '<table>' + [1,2,3,4].map(id => `<tr><td class="c2"><a class="topic" href="/read.php?tid=${id}">帖子 ${id}</a></td></tr>`).join('') + '</table>';
+      resolve({ ok: true, url, headers: { get: () => '' }, arrayBuffer: async () => new TextEncoder().encode(html).buffer });
+    }; });
+  } });
+  try {
+    root.querySelector('.app').dispatchEvent(new w.Event('wheel', { bubbles: true }));
+    w.document.querySelector('a.topic').textContent = '原页面临时变化';
+    await wait(300);
+    assert.equal(calls, 1); assert.equal(root.querySelector('.list-refresh').hidden, true);
+    finish(); await tick();
+    assert.equal(root.querySelector('.list-refresh-status').textContent, '列表已是最新');
+    assert.equal(root.querySelector('.title').textContent, '帖子 1');
+  } finally { w.close(); }
+});
 test('cached first page renders before the network and background updates wait for explicit application', async () => {
   const factory = await seeded(); let resolve, calls = 0;
   const { w, root } = await setup({ factory, fetcher: url => { calls++; return new Promise(done => { resolve = () => done(response(url, [5,1,2,3,4])); }); } });

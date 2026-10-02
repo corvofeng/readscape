@@ -143,10 +143,16 @@
     revalidateList();
   }
   function pageSignature(page) {
-    return JSON.stringify({ next: page?.next, items: page?.items.map(({tid,title,author,uid,replies,time,url,latest,pinned}) => ({tid,title,author,uid,replies,time,url,latest,pinned})) });
+    // 相对时间、分页和排序变化不代表帖子有新内容；兼容旧缓存缺省字段。
+    return JSON.stringify(page?.items.map(({tid,title,author,uid,replies,url,latest,pinned}) => ({
+      tid, title, author, uid: uid || null, replies: replies ?? null, url,
+      latest: latest || url, pinned: !!pinned
+    })).sort((a, b) => a.tid.localeCompare(b.tid)));
   }
   function stageListPage(page, force = false) {
     if (pageSignature(page) === pageSignature(listPages.get(firstListPage))) {
+      listPages.get(firstListPage).next = page.next;
+      listNext = listPages.get(listCursor).next; updateListControls();
       pendingListPage = null; refreshBar.classList.remove('has-update'); refreshButton.hidden = true; refreshStatus.textContent = '列表已是最新'; pendingAutomatic = force || prefs.autoListRefresh !== false; scheduleListUpdate(); return;
     }
     pendingListPage = page; refreshBar.classList.add('has-update'); refreshButton.hidden = false;
@@ -188,7 +194,7 @@
     pendingAutomatic = false; refreshBar.classList.remove('has-update'); refreshButton.hidden = true; refreshStatus.textContent = '列表已更新';
   }
   async function fetchListPage(url, number, signal) {
-    const response = await fetch(url, { credentials: 'same-origin', signal });
+    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-cache', signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     if (!validListURL(response.url || url, number)) throw new Error('原站返回了其他页面');
     const bytes = new Uint8Array(await response.arrayBuffer()), initial = new TextDecoder('utf-8').decode(bytes);
@@ -234,7 +240,7 @@
       cacheListPages();
     }
     if (listFromCache) return;
-    if (listInteraction) { stageListPage(page); return; }
+    if (listInteraction) { revalidateList(); return; }
     listPages.set(firstListPage, page);
     listNext = listPages.get(listCursor).next;
     mergeListPages(); cacheListPages();
