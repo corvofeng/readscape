@@ -58,7 +58,7 @@ https://<TOKEN>@raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga
 2. 到仓库 `Settings → Secrets and variables → Actions` 新建 secret，名字为 `READSCAPE_UPDATE_TOKEN`，值为上面的 token。
 3. 发布一个新版本标签，或在 Actions 里选择版本标签手动 `Run workflow`。此后 `dist` 分支根目录的脚本就带有 token，可自动更新；固定版本目录和 Release 附件不含 token。未配置该 secret 时，产物为不含 token 版本（正是公开仓库需要的形态）。
 
-`npm run install-url` 会自动读取 `READSCAPE_UPDATE_TOKEN` / `GH_TOKEN` / `gh auth token`：私有期间打印带 token 的地址，公开后打印纯 raw 地址。token 不会被写入仓库任何文件。
+`npm run install-url` 默认打印纯公开 raw 安装地址。如需进行私有测试，可通过显式环境变量 `READSCAPE_UPDATE_TOKEN` 生成带 token 的地址；脚本不会主动读取本机 `gh` CLI 或系统凭证。
 
 > 提示：`npm run check` 的测试偶尔会因异步时序出现单次抖动（重跑即通过）；CI 若因个别用例偶发失败，可重新运行 workflow。
 
