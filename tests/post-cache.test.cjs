@@ -82,7 +82,9 @@ test('the reader records the first OP attachment as a cover URL, excluding emoti
  const lw=list.window;sessions.push({w:lw});lw.indexedDB=factory;
  const src=Object.getOwnPropertyDescriptor(lw.HTMLImageElement.prototype,'src');lw.Object.defineProperty(lw.HTMLImageElement.prototype,'src',{get:src.get,set(value){src.set.call(this,value);queueMicrotask(()=>this.dispatchEvent(new lw.Event('load')));}});
  lw.fetch=()=>{throw new Error('cached list must not request the thread');};lw.eval(bundle);
- const root=lw.document.querySelector('#nga-cards-host').shadowRoot,card=root.querySelector('.card'),cover=card.querySelector('.cover');
+ const root=lw.document.querySelector('#nga-cards-host').shadowRoot;
+ for(let i=0;i<100&&!root.querySelector('.card');i++)await new Promise(resolve=>setTimeout(resolve,5));
+ const card=root.querySelector('.card'),cover=card.querySelector('.cover');
  for(let i=0;i<100&&!cover.classList.contains('cached-cover');i++)await new Promise(resolve=>setTimeout(resolve,5));
  assert(cover.classList.contains('cached-cover'));assert.equal(root.querySelector('.card'),card);assert.equal(cover.querySelector('img').src,image,'列表直接引用原图地址');
  assert.equal(cover.querySelector('img').style.aspectRatio,'640 / 1407','列表在图片加载前按存储比例占位，滚动时高度不跳');

@@ -114,35 +114,21 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     const b = button(label, '', () => { tab = id; render(); }); b.dataset.tab = id; b.setAttribute('role', 'tab'); tabs.append(b);
   }
   const grid = node('section', 'grid'); grid.setAttribute('aria-label', '帖子卡片');
-  // 瀑布流的行高由脚本按卡片实测高度后补，且封面套用、翻页追加、卡片替换都会让
-  // 布局在点击前后发生位移（甚至触发滚动锚点跳动）。浏览器把 click 派发给"抬手时
-  // 恰好位于指尖下"的卡片，于是可能打开与按下时不同的帖子。这里记住按下的卡片，
-  // 若抬手时命中的是另一张，就纠正为按下时那张的目标，保证"点谁开谁"。
-  let pressedCard = null, pressedAt = 0;
-  grid.addEventListener('pointerdown', event => {
-    pressedCard = event.target.closest?.('.card') || null; pressedAt = Date.now();
-  }, true);
-  grid.addEventListener('pointercancel', () => { pressedCard = null; }, true);
-  grid.addEventListener('click', event => {
-    const cover = event.target.closest?.('.cover');
-    if (!cover || !pressedCard) return;
-    const clicked = event.target.closest('.card');
-    const stale = pressedCard; pressedCard = null;
-    if (clicked === stale || event.defaultPrevented) return;
-    if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    if (Date.now() - pressedAt > 1500) return;
-    const url = stale.querySelector('.cover')?.href;
-    if (!url) return;
-    // 指尖下的卡片已因布局位移换人：拦截默认跳转，改开按下时看到的那张。
-    event.preventDefault(); event.stopPropagation();
-    window.location.href = url;
-  }, true);
+  // 手势期间只收集更新，避免按下与抬手之间改变卡片几何位置。
+  let listInteraction = false;
+  for (const type of ['wheel', 'touchstart', 'keydown', 'click']) app.addEventListener(type, () => { listInteraction = true; markListActivity(); }, { passive: true, capture: true });
+  // 链接的原生聚焦可能把半露出的卡片滚入视口。保留聚焦与点击语义，禁止聚焦滚动。
+  grid.addEventListener('mousedown', event => {
+    const cover = event.target.closest?.('a.cover');
+    if (!cover || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault(); cover.focus({ preventScroll: true });
+  });
   const empty = node('div', 'empty'), pager = node('nav', 'pager'); pager.setAttribute('aria-label', '论坛分页');
   main.append(intro, tabs, grid, empty, pager, node('div', 'foot', '按原站顺序追加 · 热议为已加载帖子回复 ≥ 100 · 收藏仅存本浏览器'));
   app.append(top, main);
   const restore = button('卡片模式', 'restore', () => toggle(true)); restore.hidden = true;
   shadow.append(app, restore); document.documentElement.append(host);
-  readingSettings = mountSettings({ context: window, shadow, app, prefs, cache: postCache, save: savePrefs, change: () => { if (prefs.smoothNavigation === false) navigation.finish(); settingsRefresh(); settings.querySelectorAll('input').forEach(c => { c.checked = !!prefs['single']; }); }, original: () => modeToggle(false), login: openLogin });
+  readingSettings = mountSettings({ context: window, shadow, app, prefs, cache: postCache, save: savePrefs, change: () => { if (prefs.smoothNavigation === false) navigation.finish(); settingsRefresh(); if (!app.classList.contains('reader')) configureListRefresh(); settings.querySelectorAll('input').forEach(c => { c.checked = !!prefs['single']; }); }, original: () => modeToggle(false), login: openLogin });
   let accountSignature;
   function refreshAccount() {
     const account = currentAccount(), signature = JSON.stringify(account);
@@ -206,7 +192,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   function toggle(enabled) {
     const readingPosition = getReadingScroll();
     prefs.enabled = enabled; savePrefs();
-    app.hidden = !enabled || !items.length;
+    app.hidden = !enabled || (!items.length && !listBootPending);
     restore.hidden = enabled || !items.length;
     setViewport(!app.hidden);
     setSurface(!app.hidden, readingPosition);
@@ -269,16 +255,25 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
 
   /* LIST_MODULE */
 
-  // masonry 以固定 4px 行高近似卡片高度。封面等异步内容改变高度后必须立即重算，
-  // 否则预留行数偏小，卡片会与下方卡片重叠，导致点击命中错误的帖子。
-  // ResizeObserver 对"应用缓存封面后再入树"的异步增高并不可靠，故显式调用。
-  function sizeCard(card) {
-    if (!card?.isConnected || !grid.classList.contains('masonry')) return;
-    const height = card.getBoundingClientRect().height;
-    if (height <= 0) return;
-    const span = `span ${Math.max(1, Math.ceil((height + 18) / 4))}`;
-    if (card.style.gridRowEnd !== span) card.style.gridRowEnd = span;
+  // 每张卡片固定所在列，列内按实测高度累加。自动网格排位会因某张卡片增高
+  // 把后续卡片换到另一列；显式行列位置让封面、字体加载与追加只影响所在列。
+  function layoutMasonry() {
+    if (!grid.isConnected || !grid.classList.contains('masonry')) return;
+    const tracks = window.getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/);
+    const columns = Math.max(1, tracks.length);
+    const rows = Array(columns).fill(1);
+    const cards = [...grid.children];
+    cards.forEach((card, index) => { card.style.gridColumn = String(index % columns + 1); });
+    const spans = cards.map(card => Math.max(1, Math.ceil(((card.getBoundingClientRect().height || card.offsetHeight) + 18) / 4)));
+    cards.forEach((card, index) => {
+      const column = index % columns;
+      const start = String(rows[column]), end = `span ${spans[index]}`;
+      if (card.style.gridRowStart !== start) card.style.gridRowStart = start;
+      if (card.style.gridRowEnd !== end) card.style.gridRowEnd = end;
+      rows[column] += spans[index];
+    });
   }
+  function sizeCard(card) { if (card?.isConnected) layoutMasonry(); }
 
   // 封面直接引用原图地址，由浏览器 HTTP 缓存承担复用；缓存只记录地址。
   function applyCachedCover(card, tid) {
@@ -287,28 +282,34 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     const generation = postCache.generation;
     postCache.getCover(tid).then(cached => {
       if (!cached || coverDisposed || generation !== postCache.generation || !card.isConnected) return;
-      const cover = card.querySelector('.cover');
-      if (!cover || card.coverSource === cached.source) return;
-      const image = node('img'); image.alt = ''; image.decoding = 'async'; image.loading = 'lazy';
-      // 已有比例时先占位，避免图片加载后卡片高度变化导致滚动中点击偏移。
-      if (cached.width > 0 && cached.height > 0) image.style.aspectRatio = `${cached.width} / ${cached.height}`;
-      // 立即入树：lazy 图片脱离文档不会触发加载；比例已占位，加载前后布局不变。
-      image.className = 'cached-cover-image';
-      image.onerror = () => { image.remove(); cover.classList.remove('cached-cover'); card.coverSource = null; sizeCard(card); };
-      // 无占位比例时图片加载完才增高，加载后补算一次跨度。
-      image.addEventListener('load', () => sizeCard(card), { once: true });
-      cover.querySelector('.cached-cover-image')?.remove();
-      cover.prepend(image); cover.classList.add('cached-cover'); card.coverSource = cached.source;
-      image.src = cached.source;
-      if (image.naturalWidth > 0 && image.naturalHeight > 0 && !image.style.aspectRatio) image.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
-      // 占位比例已确定高度，立即重算跨度，避免与下方卡片重叠。
-      sizeCard(card);
+      if (card.coverSignature === JSON.stringify([cached.source, cached.width || 0, cached.height || 0])) return;
+      if (listInteraction || readerCoversList()) queueListCover(card, cached);
+      else setCardCover(card, cached);
     }).catch(() => {}).finally(() => { card.coverLoading = false; });
+  }
+  function setCardCover(card, cached) {
+    const cover = card.querySelector('.cover');
+    if (!cover || card.coverSignature === JSON.stringify([cached.source, cached.width || 0, cached.height || 0])) return;
+    const image = node('img'); image.alt = ''; image.decoding = 'async'; image.loading = 'lazy';
+    // 已有比例时先占位，避免图片加载后卡片高度变化导致滚动中点击偏移。
+    if (cached.width > 0 && cached.height > 0) image.style.aspectRatio = `${cached.width} / ${cached.height}`;
+    // 立即入树：lazy 图片脱离文档不会触发加载；比例已占位，加载前后布局不变。
+    image.className = 'cached-cover-image';
+    image.onerror = () => { image.onerror = null; image.removeAttribute('src'); image.alt = '封面暂时不可用'; image.classList.add('cover-image-error'); };
+    // 无占位比例时图片加载完才增高，加载后补算一次跨度。
+    image.addEventListener('load', () => sizeCard(card), { once: true });
+    cover.querySelector('.cached-cover-image')?.remove();
+    cover.prepend(image); cover.classList.add('cached-cover'); card.coverSource = cached.source; card.coverSignature = JSON.stringify([cached.source, cached.width || 0, cached.height || 0]);
+    image.src = cached.source;
+    if (image.naturalWidth > 0 && image.naturalHeight > 0 && !image.style.aspectRatio) image.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+    // 占位比例已确定高度，立即重算跨度，避免与下方卡片重叠。
+    sizeCard(card);
   }
   const unsubscribeCache = postCache?.subscribe(event => {
     if (event.type === 'cover') { const card = listCards.get(event.tid)?.card; if (card) applyCachedCover(card, event.tid); }
     if (event.type === 'clear') {
-      for (const {card} of listCards.values()) { card.querySelector('.cached-cover-image')?.remove(); card.querySelector('.cover')?.classList.remove('cached-cover'); card.coverSource = null; }
+      pendingListCovers.clear();
+      for (const {card} of listCards.values()) { card.querySelector('.cached-cover-image')?.remove(); card.querySelector('.cover')?.classList.remove('cached-cover'); card.coverSource = null; card.coverSignature = null; }
     }
     if (event.type === 'favorites') postCache.getFavorites().then(saved => {
       if (!saved || coverDisposed) return;
@@ -360,6 +361,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
 
   function scan() {
     autoContinue();
+    if (listBootPending) return;
     const found = extract();
     const sig = JSON.stringify(found);
     if (sig === signature) return;
@@ -372,13 +374,17 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
       return;
     }
     if (found.length) updateListPage(found);
+    updateListHeading();
+    toggle(prefs.enabled !== false);
+    renderPager();
+  }
+
+  function updateListHeading() {
     const board = [...document.querySelectorAll('a[href*="thread.php"]')].find(a => {
       const u = safeURL(a.getAttribute('href'));
       return u && u.searchParams.get('stid') === pageURL.searchParams.get('stid') && a.textContent.trim().length > 3;
     });
     h1.textContent = board?.textContent.trim() || document.title.replace(/\s*[-_].*NGA.*$/i, '') || '论坛发现';
-    toggle(!!prefs.enabled);
-    renderPager();
   }
 
   function renderPager() {
@@ -391,15 +397,51 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const color = tid => palette[Number(tid.slice(-4)) % palette.length];
   const count = n => n == null ? '讨论' : n >= 10000 ? `${(n / 10000).toFixed(1)}万回复` : `${n} 回复`;
 
+  // 列表滚动位置跨整页加载保留。平滑阅读用 iframe 覆盖列表、位置天然不动；但整页
+  // 跳转 / 刷新 / 新标签打开时列表会重建，而卡片是异步渲染的——浏览器原生滚动恢复
+  // 触发那一刻页面还很短，会被夹回顶部。于是自己按列表地址存一份，返回或刷新后等
+  // 卡片把高度撑起来再滚回去，做到"从哪来回哪去"。
+  const listNavType = (() => {
+    const nav = window.performance?.getEntriesByType?.('navigation')?.[0];
+    if (nav?.type) return nav.type;
+    const legacy = window.performance?.navigation?.type;
+    return legacy === 2 ? 'back_forward' : legacy === 1 ? 'reload' : 'navigate';
+  })();
+  let listScrollRestored = false, listScrollTries = 0, listScrollSaveTimer;
+  const listScrollKey = () => `${KEY}-scroll-${streamKey}#${firstListPage}`;
+  function saveListScroll() {
+    // 阅读态由 navigation 自己记住列表位置；此处只在浏览列表时记录，避免覆盖成阅读页的滚动。
+    if (!streamKey || document.documentElement.hasAttribute('data-readscape-reader-open')) return;
+    try { sessionStorage.setItem(listScrollKey(), JSON.stringify({ y: Math.round(getReadingScroll()), at: Date.now() })); } catch { /* 存储被禁用时忽略 */ }
+  }
+  function cancelListRestore() { listScrollRestored = true; }
+  for (const type of ['wheel', 'touchstart', 'pointerdown', 'keydown']) app.addEventListener(type, cancelListRestore, { passive: true, capture: true });
+  function restoreListScroll() {
+    if (listScrollRestored || !streamKey || app.hidden) return;
+    if (listNavType !== 'back_forward' && listNavType !== 'reload') { listScrollRestored = true; return; }
+    let saved; try { saved = JSON.parse(sessionStorage.getItem(listScrollKey()) || 'null'); } catch { saved = null; }
+    if (!saved || !(saved.y > 0) || Date.now() - saved.at > 30 * 60000) { listScrollRestored = true; return; }
+    // 高度不足时先等待，卡片渲染 / 翻页 hydrate 完成后才能滚到目标位置。
+    const room = usesDocumentScroll() ? document.documentElement.scrollHeight - window.innerHeight : app.scrollHeight - app.clientHeight;
+    if (room < saved.y - 4 && listScrollTries++ < 50) { window.setTimeout(restoreListScroll, 60); return; }
+    listScrollRestored = true;
+    setReadingScroll(saved.y);
+  }
+  window.addEventListener('scroll', () => {
+    if (listScrollSaveTimer) return;
+    listScrollSaveTimer = window.setTimeout(() => { listScrollSaveTimer = null; saveListScroll(); }, 250);
+  }, { passive: true });
+  window.addEventListener('pagehide', saveListScroll);
+
   function render(cacheVisit = true) {
     grid.classList.toggle('single', !!prefs.single);
     for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
     // 收藏包含曾浏览过的其他页；全部与热议保持已加载页面的原始顺序。
     const source = tab === 'saved' ? Object.values(favorites) : items;
     const visible = source.filter(item => (tab !== 'hot' || item.replies >= 100) && (!query || `${item.title} ${item.author}`.toLowerCase().includes(query)));
-    if (cacheVisit) postCache?.visit(visible);
+    if (cacheVisit && !listBootPending) postCache?.visit(listFromCache || pendingListPage ? visible.map(({tid}) => ({tid})) : visible);
     subtitle.textContent = `第 ${firstListPage}${listPages.size > 1 ? `–${listCursor}` : ''} 页 · ${visible.length} 篇${query ? ' · 已加载搜索' : ''}`;
-    empty.textContent = tab === 'saved' ? '点击卡片上的 ♡ 收藏帖子。' : '没有符合条件的帖子。';
+    empty.textContent = listBootPending ? '正在准备列表…' : tab === 'saved' ? '点击卡片上的 ♡ 收藏帖子。' : '没有符合条件的帖子。';
     empty.hidden = visible.length > 0;
     const retained = new Set(visible.map(item => item.tid));
     for (const card of [...grid.children]) if (!retained.has(card.dataset.tid)) { cardObserver?.unobserve(card); card.remove(); }
@@ -407,7 +449,10 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
       const { lastAccess, updatedAt, contentHtml, coverId, ...appearance } = item;
       const signature = JSON.stringify(appearance);
       let entry = listCards.get(item.tid);
-      if (!entry || entry.signature !== signature) {
+      if (entry && entry.signature !== signature) {
+        updateCard(entry.card, item); entry.signature = signature;
+      }
+      if (!entry) {
         const card = makeCard(item);
         if (entry?.card.isConnected) { cardObserver?.unobserve(entry.card); entry.card.replaceWith(card); }
         entry = { card, signature }; listCards.set(item.tid, entry);
@@ -419,17 +464,18 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     }
     // 保留 DOM 中的原站顺序，按实际高度跨网格行，避免短卡片下方留白。
     if (typeof window.ResizeObserver === 'function') {
-      cardObserver ||= new window.ResizeObserver(entries => {
-        for (const { target } of entries) sizeCard(target);
-      });
+      cardObserver ||= new window.ResizeObserver(layoutMasonry);
       grid.classList.add('masonry');
-      for (const card of grid.children) { sizeCard(card); cardObserver.observe(card); }
+      layoutMasonry();
+      cardObserver.observe(grid);
+      for (const card of grid.children) cardObserver.observe(card);
     }
     updateListControls();
+    restoreListScroll();
   }
 
   function makeCard(item) {
-    const card = node('article', 'card'); card.dataset.tid = item.tid; card.style.setProperty('--bg', color(item.tid));
+    const card = node('article', 'card'); card.item = item; card.classList.add('card-enter'); card.addEventListener('animationend', () => card.classList.remove('card-enter'), { once: true }); card.dataset.tid = item.tid; card.style.setProperty('--bg', color(item.tid));
     const cover = link(item.url, '', 'cover');
     const eye = node('div', 'eyebrow', 'NGA · 讨论');
     if (item.pinned) eye.append(node('span', 'tag', '置顶'));
@@ -445,6 +491,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     const fav = button(saved ? '♥' : '♡', 'save', () => {
       if (favorites[item.tid]) delete favorites[item.tid]; else favorites[item.tid] = { ...item };
       favoriteChanges.add(item.tid); postCache?.setFavorite(item, !!favorites[item.tid]);
+      fav.classList.remove('save-pop'); void fav.offsetWidth; fav.classList.add('save-pop');
       const state = !!favorites[item.tid]; fav.textContent = state ? '♥' : '♡'; fav.setAttribute('aria-pressed', String(state));
       if (tab === 'saved') render();
     });
@@ -452,16 +499,29 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     const meta = node('div', 'meta'); meta.append(node('span', '', count(item.replies)), node('span', '', item.time));
     if (item.latest && item.latest !== item.url && new URL(item.latest).searchParams.has('page')) meta.append(link(item.latest, '最新回复', 'latest'));
     body.append(person, meta); card.append(cover, body);
+    if (item.coverId && safeURL(item.coverId)) setCardCover(card, { source: item.coverId, width: item.coverW, height: item.coverH });
     return card;
+  }
+
+  function updateCard(card, incoming) {
+    Object.assign(card.item, incoming);
+    card.querySelector('.title').textContent = incoming.title;
+    card.querySelector('.author').textContent = incoming.author || '作者未识别';
+    card.querySelector('.avatar').textContent = incoming.author.slice(0, 1) || 'N';
+    card.querySelector('.cover').href = incoming.url;
+    const eye = card.querySelector('.eyebrow'); eye.replaceChildren(document.createTextNode('NGA · 讨论'));
+    if (incoming.pinned || incoming.replies >= 100) eye.append(node('span', 'tag', incoming.pinned ? '置顶' : '热议'));
+    const meta = card.querySelector('.meta'); meta.replaceChildren(node('span', '', count(incoming.replies)), node('span', '', incoming.time));
+    if (incoming.latest && incoming.latest !== incoming.url && new URL(incoming.latest).searchParams.has('page')) meta.append(link(incoming.latest, '最新回复', 'latest'));
   }
 
   /* BBCODE_MODULE */
   /* READER_MODULE */
   if (/\/read\.php$/.test(pageURL.pathname)) { startReader(); return; }
-  scan();
+  startList(); configureListRefresh();
   // 列表由 NGA 后续脚本生成时再扫描，不覆盖登录/错误页。
   const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(scan, 220); });
   observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   observeListEnd();
-  window.addEventListener('pagehide', () => { observer.disconnect(); cardObserver?.disconnect(); listObserver?.disconnect(); listController?.abort(); clearTimeout(timer); clearTimeout(gateTimer); });
+  window.addEventListener('pagehide', () => { observer.disconnect(); cardObserver?.disconnect(); listObserver?.disconnect(); listController?.abort(); refreshController?.abort(); stopListRefresh(); clearTimeout(timer); clearTimeout(gateTimer); });
 }

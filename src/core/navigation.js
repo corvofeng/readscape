@@ -11,19 +11,21 @@ function createNavigation(config, context = globalThis.window) {
     document.title = background.title;
     background.cleanup?.();
     background.frame.remove(); background.notice.remove();
+    document.documentElement.removeAttribute('data-readscape-reader-open');
     if (background.list) {
       background.list.style.visibility = background.listVisibility;
       background.list.inert = background.listInert;
       background.list.style.overflow = background.listOverflow;
       if (document.documentElement.hasAttribute('data-readscape-document-scroll')) {
-        window.scrollTo({ left: background.documentScroll.left, top: background.documentMode ? background.documentScroll.top : background.listScroll });
+        const left = background.documentScroll.left, top = background.documentMode ? background.documentScroll.top : background.listScroll;
+        if (window.scrollX !== left || window.scrollY !== top) window.scrollTo({ left, top });
       } else {
         background.list.scrollTop = background.documentMode ? background.documentScroll.top : background.listScroll;
       }
     }
-    document.documentElement.removeAttribute('data-readscape-reader-open');
     if (background.shown && background.focus?.isConnected) background.focus.focus({ preventScroll: true });
     background = null;
+    document.dispatchEvent(new document.defaultView.Event('readscape-list-resume'));
   }
   function openReader(u, restoring = false) {
     disposeBackground(); finish();
@@ -70,7 +72,8 @@ function createNavigation(config, context = globalThis.window) {
         if (list) {
           Object.assign(state, { list, listVisibility: list.style.visibility, listInert: !!list.inert, listOverflow: list.style.overflow, listScroll: list.scrollTop,
             documentMode: document.documentElement.hasAttribute('data-readscape-document-scroll'), documentScroll: { left: window.scrollX, top: window.scrollY } });
-          list.style.visibility = 'hidden'; list.inert = true; list.style.overflow = 'hidden';
+          list.style.visibility = 'hidden'; list.inert = true;
+          if (!state.documentMode) list.style.overflow = 'hidden';
           document.documentElement.setAttribute('data-readscape-reader-open', '');
           // 原列表仍在文档中；由它保留位置，避免浏览器遍历历史时另行滚动。
           if (scrollRestoration === undefined) scrollRestoration = history.scrollRestoration ?? 'auto';

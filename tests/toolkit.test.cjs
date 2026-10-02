@@ -72,7 +72,7 @@ test('compact settings allow live page preview, expose switches and close by can
   // Exercise the native dialog route as well as the jsdom fallback used by other tests.
   let opens=0,closes=0;mask.show=()=>{opens++;mask.setAttribute('open','');};mask.close=()=>{closes++;mask.removeAttribute('open');};
   fab.click();assert.equal(opens,1);assert(mask.open);assert(!app.inert);assert.equal(app.style.overflow,'auto');assert.equal(r.querySelector('.rt-more').open,false);
-  assert.equal(r.querySelectorAll('input[role=switch]').length,4);
+  assert.equal(r.querySelectorAll('input[role=switch]').length,5);
   const scale=r.querySelector('[data-pref=fontScale]');scale.value='1.25';scale.dispatchEvent(new w.Event('input'));
   assert.equal(r.querySelector('.rt-scale').textContent,'125%');assert(!app.inert);
   const cancel=new w.Event('cancel',{cancelable:true});mask.dispatchEvent(cancel);assert(cancel.defaultPrevented);assert(mask.hidden);assert(!app.inert);assert.equal(app.style.overflow,'auto');assert.equal(app.scrollTop,237);assert.equal(r.activeElement,fab);

@@ -59,7 +59,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
   const more = document.createElement('details'); more.className = 'rt-more';
   const moreTitle = document.createElement('summary'); moreTitle.textContent = '更多设置'; more.append(moreTitle); sheet.append(more);
   row('配色', 'theme', 'select', [['light','明亮'],['paper','暖纸'],['dark','深色']], more);
-  row('手机单列', 'single', 'checkbox', undefined, more); row('关联对话', 'groupReplies', 'checkbox', undefined, more); row('平滑跳转过渡', 'smoothNavigation', 'checkbox', undefined, more);
+  row('手机单列', 'single', 'checkbox', undefined, more); row('关联对话', 'groupReplies', 'checkbox', undefined, more); row('平滑跳转过渡', 'smoothNavigation', 'checkbox', undefined, more); row('列表自动刷新（10 秒）', 'autoListRefresh', 'checkbox', undefined, more);
   const note = document.createElement('p'); note.className = 'rt-note'; note.textContent = '字体使用设备现有字体。单双列适用于列表；关联对话适用于评论，关闭时按楼层顺序阅读。'; more.append(note);
   const actions = document.createElement('div'); actions.className = 'rt-actions';
   const reset = document.createElement('button'); reset.textContent = '恢复默认';
@@ -91,7 +91,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
   let cacheRefreshTimer;
   const unsubscribeCache = cache?.subscribe(() => { if (!mask.hidden) { context.clearTimeout(cacheRefreshTimer); cacheRefreshTimer=context.setTimeout(refreshCache,80); } });
   context.addEventListener('pagehide', () => { unsubscribeCache?.(); context.clearTimeout(cacheRefreshTimer); });
-  function sync() { for (const [key,c] of controls) { if (c.type === 'checkbox') c.checked = ['smoothNavigation','cacheEnabled'].includes(key) ? prefs[key] !== false : !!prefs[key]; else c.value = prefs[key] ?? ({fontScale:1,font:'system',theme:'light',cacheMaxPosts:500}[key]); } sheet.querySelector('.rt-scale').textContent = `${Math.round(Number(controls.get('fontScale').value) * 100)}%`; }
+  function sync() { for (const [key,c] of controls) { if (c.type === 'checkbox') c.checked = ['smoothNavigation','cacheEnabled','autoListRefresh'].includes(key) ? prefs[key] !== false : !!prefs[key]; else c.value = prefs[key] ?? ({fontScale:1,font:'system',theme:'light',cacheMaxPosts:500}[key]); } sheet.querySelector('.rt-scale').textContent = `${Math.round(Number(controls.get('fontScale').value) * 100)}%`; }
   const account = document.createElement('button'); account.className = 'rt-account'; account.textContent = '登录'; account.onclick = () => { hide(true, true); login?.(account); }; if (login) header.insertBefore(account, close);
   let opener = fab, sheetAnimation, animationVersion = 0, closing = false;
   const measurePanel = () => app.style.setProperty('--rt-panel-height', `${Math.ceil(sheet.getBoundingClientRect().height)}px`);
@@ -133,7 +133,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
   fab.onclick = () => open();
   mask.addEventListener('cancel', event => { event.preventDefault(); hide(); });
   close.onclick = () => hide(); native.onclick = () => { hide(true, true); original(); };
-  reset.onclick = () => { Object.assign(prefs,{fontScale:1,font:'system',theme:'light',single:false,groupReplies:false,smoothNavigation:true,cacheEnabled:true,cacheMaxPosts:500}); save(); sync(); apply(); configureCache(); change(); };
+  reset.onclick = () => { Object.assign(prefs,{fontScale:1,font:'system',theme:'light',single:false,groupReplies:false,smoothNavigation:true,autoListRefresh:true,cacheEnabled:true,cacheMaxPosts:500}); save(); sync(); apply(); configureCache(); change(); };
   mask.onclick = e => { if (e.target === mask) hide(); };
   mask.addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hide(); }
