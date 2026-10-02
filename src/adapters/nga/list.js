@@ -86,12 +86,25 @@
     return u && listKey(u.href) === streamKey && Number(u.searchParams.get('page') || 1) === number ? u.href : null;
   }
   function nextListURL(doc, number, base) {
-    for (const a of doc.querySelectorAll('a[href*="thread.php"]')) {
-      if (!/^(?:\d+|后页|下一页|>|»)$/.test(a.textContent.trim().replace(/\p{M}/gu, ''))) continue;
+    const nextURL = new URL(base); nextURL.searchParams.set('page', number + 1); nextURL.hash = '';
+    // 原站分页栏可能尚未生成，抓取的 HTML 也不会执行生成分页的脚本。
+    let metadata = doc === document ? ngaPageContext(window).__PAGE : null;
+    if (!metadata) {
+      const literal = [...doc.scripts].map(script => script.textContent).join('\n').match(/\b__PAGE\s*=\s*\{([^}]+)\}/)?.[1];
+      if (literal) {
+        metadata = {};
+        for (const match of literal.matchAll(/(?:^|,)\s*['"]?([123])['"]?\s*:\s*(\d+)/g)) metadata[match[1]] = Number(match[2]);
+      }
+    }
+    if (Number.isSafeInteger(Number(metadata?.[1])) && Number(metadata[1]) >= 0 && Number(metadata[3]) > 0) {
+      return number < Math.ceil((Number(metadata[1]) + 1) / Number(metadata[3])) ? nextURL.href : null;
+    }
+    for (const a of doc.querySelectorAll('a[href]')) {
       const next = validListURL(safeURL(a.getAttribute('href'), base)?.href, number + 1);
       if (next) return next;
     }
-    return null;
+    // 缺少分页信息不代表末页；按原站 page 参数尝试，重复页和错误响应会停止加载。
+    return nextURL.href;
   }
   function cacheListPages() {
     if (!streamKey) return;
@@ -105,7 +118,8 @@
     while (true) {
       const page = cache?.find(p => p.number === number && validListURL(p.url, number));
       if (!page || !page.items.length || !page.items.every(validCachedItem) || page.next && !validListURL(page.next, number + 1)) break;
-      restored.set(number, { url: page.url, items: page.items, next: page.next });
+      const next = page.next || nextListURL(document, number, page.url);
+      restored.set(number, { url: page.url, items: page.items, next });
       if (!page.next) break;
       number++;
     }
@@ -215,6 +229,10 @@
   function updateListPage(found) {
     for (const item of found) item.lastAccess = Date.now();
     const page = { url: pageURL.href, items: found, next: nextListURL(document, firstListPage, pageURL.href) };
+    if (listPages.has(firstListPage) && listCursor === firstListPage && listNext !== page.next) {
+      listPages.get(firstListPage).next = listNext = page.next;
+      cacheListPages();
+    }
     if (listFromCache) return;
     if (listInteraction) { stageListPage(page); return; }
     listPages.set(firstListPage, page);
@@ -226,6 +244,7 @@
     listLoad.disabled = listBusy || listBootPending;
     listLoad.hidden = !listNext;
     listLoad.textContent = listBusy ? '正在加载…' : listFailed ? '重试下一页' : '加载下一页';
+    if (listNext && listStatus.textContent === '已经到底了') listStatus.textContent = '';
     if (!listNext && items.length) listStatus.textContent = '已经到底了';
   }
   async function loadNextListPage() {

@@ -363,7 +363,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     autoContinue();
     if (listBootPending) return;
     const found = extract();
-    const sig = JSON.stringify(found);
+    const sig = JSON.stringify([found, nextListURL(document, firstListPage, pageURL.href)]);
     if (sig === signature) return;
     signature = sig;
     if (!found.length && !items.length) {
@@ -377,6 +377,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     updateListHeading();
     toggle(prefs.enabled !== false);
     renderPager();
+    observeListEnd();
   }
 
   function updateListHeading() {

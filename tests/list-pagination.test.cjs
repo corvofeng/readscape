@@ -6,9 +6,10 @@ const {IDBFactory}=require('fake-indexeddb');
 const bundle=fs.readFileSync(__dirname+'/../dist/readscape-nga.user.js','utf8');
 const cacheKey='nga-cards-v1-list-cache';
 const row=(tid,title=`测试帖子 ${tid}`)=>`<tr><td class="c1">120</td><td class="c2"><a class="topic" href="/read.php?tid=${tid}">${title}</a></td><td class="c3"><a class="author">作者</a></td></tr>`;
-const html=(ids,next,board=1)=>`<head><title>测试板块</title></head><body>${next?`<a href="/thread.php?fid=${board}&page=${next}">后页</a>`:''}<table id="topicrows">${ids.map(id=>row(id)).join('')}</table></body>`;
+const html=(ids,next,board=1)=>`<head><title>测试板块</title></head><body>${next?`<a href="/thread.php?fid=${board}&page=${next}">后页</a>`:'<script>var __PAGE = {0:"/thread.php",1:0,2:1,3:35};</script>'}<table id="topicrows">${ids.map(id=>row(id)).join('')}</table></body>`;
 const response=(url,body)=>({ok:true,url,headers:{get:()=>''},arrayBuffer:async()=>new TextEncoder().encode(body).buffer});
 const tick=()=>new Promise(resolve=>setTimeout(resolve,20));
+const metadata=(total,page)=>`<script>var __PAGE = {0:'/thread.php?fid=1', 1: ${total}, 2: ${page}, 3: 35};</script>`;
 async function setup({body=html([1,2],2),url='https://bbs.nga.cn/thread.php?fid=1',mobile=false,cache,observer=false,factory=new IDBFactory()}={}){
  const dom=new JSDOM(body,{url,runScripts:'dangerously',virtualConsole:new VirtualConsole()}),w=dom.window;
  w.indexedDB=factory;w.Blob=Blob;w.TextDecoder=TextDecoder;w.scrollY=0;w.scrollX=0;w.scrollTo=({top,left=0})=>{w.scrollY=top;w.scrollX=left;};
@@ -54,6 +55,55 @@ test('the bottom sentinel auto-loads only the unfiltered visible list and pauses
   input.value='';input.dispatchEvent(new w.Event('input'));observers.at(-1).callback([{isIntersecting:true}]);await tick();assert.equal(calls,1);
   observers.at(-1).callback([{isIntersecting:true}]);assert.equal(calls,1);assert.match(root.querySelector('.list-load').textContent,/重试/);
   w.fetch=async url=>{calls++;return response(url,html([3],null));};root.querySelector('.list-load').click();await tick();assert.equal(calls,2);
+ }finally{w.close();}
+});
+test('NGA script pagination auto-loads through page 15 without rendered pager links',async()=>{
+ const {w,root,observers}=await setup({body:html([1],null).replace(/<script>.*?<\/script>/,metadata(524,1)),observer:true});
+ try{
+  const old=root.querySelector('.card'),requested=[];
+  w.fetch=async url=>{const page=Number(new URL(url).searchParams.get('page'));requested.push(page);return response(url,html([1,page],null).replace(/<script>.*?<\/script>/,metadata(524,page)));};
+  for(let page=2;page<=15;page++){
+   assert(!root.querySelector('.list-load').hidden);
+   observers.at(-1).callback([{isIntersecting:true}]);await tick();
+   assert.equal(root.querySelector('.card'),old);
+   assert.equal(root.querySelectorAll('.card').length,page);
+  }
+  observers.at(-1).callback([{isIntersecting:true}]);await tick();
+  assert.deepEqual(requested,Array.from({length:14},(_,i)=>i+2));
+  assert(root.querySelector('.list-load').hidden);assert.equal(root.querySelector('.list-status').textContent,'已经到底了');
+ }finally{w.close();}
+});
+test('unknown pagination probes the next native page and stops on duplicates',async()=>{
+ const {w,root,observers}=await setup({body:html([1],null).replace(/<script>.*?<\/script>/,''),observer:true});
+ try{
+  const requested=[];
+  w.fetch=async url=>{requested.push(url);return response(url,html([1,2],null).replace(/<script>.*?<\/script>/,''));};
+  observers.at(-1).callback([{isIntersecting:true}]);await tick();assert.equal(root.querySelectorAll('.card').length,2);
+  observers.at(-1).callback([{isIntersecting:true}]);await tick();assert(root.querySelector('.list-load').hidden);
+  observers.at(-1).callback([{isIntersecting:true}]);await tick();
+  assert.deepEqual(requested.map(url=>new URL(url).searchParams.get('page')),['2','3']);
+ }finally{w.close();}
+});
+test('late native pagination updates controls even when cards are unchanged and refresh is disabled',async()=>{
+ const {w,root}=await setup({body:html([1],null)});
+ try{
+  assert(root.querySelector('.list-load').hidden);
+  root.querySelector('[data-tab=all]').click();
+  w.__PAGE={0:'/thread.php?fid=1',1:469,2:1,3:35};
+  w.document.querySelector('table').insertAdjacentHTML('beforebegin','<div id="pagebbtm"><a href="?fid=1&page=2" title="下一页">继续</a></div>');
+  await new Promise(resolve=>setTimeout(resolve,300));
+  assert(!root.querySelector('.list-load').hidden);assert.notEqual(root.querySelector('.list-status').textContent,'已经到底了');
+ }finally{w.close();}
+});
+test('cached end markers recover when native pagination indicates more pages',async()=>{
+ const factory=new IDBFactory(),first=await setup({factory,body:html([1],null)});
+ await tick();await tick();first.w.close();
+ const {w,root}=await setup({factory,body:html([1],2)});
+ try{
+  assert(!root.querySelector('.list-load').hidden);
+  let requested;w.fetch=async url=>{requested=url;return response(url,html([2],null));};
+  root.querySelector('.list-load').click();await tick();
+  assert.equal(new URL(requested).searchParams.get('page'),'2');assert.equal(root.querySelectorAll('.card').length,2);
  }finally{w.close();}
 });
 test('cache resumes contiguous pages without fetching, and isolates boards and thread pages',async()=>{
