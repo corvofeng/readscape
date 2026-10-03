@@ -10,6 +10,14 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const prefs = read(KEY, { enabled: true, single: false });
   const favorites = read(`${KEY}-favorites`, {}), favoriteChanges = new Set();
   const pageURL = new URL(location.href);
+  const initialListPageParam = pageURL.pathname === '/thread.php' ? (Number(pageURL.searchParams.get('page')) || 1) : 1;
+  const hasNonFirstPage = initialListPageParam > 1;
+  if (hasNonFirstPage) {
+    pageURL.searchParams.delete('page');
+    if (prefs.enabled !== false && typeof history?.replaceState === 'function') {
+      try { history.replaceState(history.state, '', pageURL.href); } catch {}
+    }
+  }
   const host = document.createElement('div');
   host.id = 'nga-cards-host';
   // Shadow DOM 避免 NGA 自带 CSS 与卡片样式互相影响。
@@ -481,7 +489,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
       setViewport(false);
       return;
     }
-    if (found.length) updateListPage(found);
+    if (found.length && !hasNonFirstPage) updateListPage(found);
     updateListHeading();
     toggle(prefs.enabled !== false);
     renderPager();

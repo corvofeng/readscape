@@ -1,7 +1,7 @@
-  const firstListPage = Math.max(1, Number(pageURL.searchParams.get('page')) || 1);
+  const firstListPage = 1;
   const listPages = new Map();
   let listCursor = firstListPage, listNext = null, listBusy = false, listFailed = false, listController;
-  let listBootPending = !!(postCache && window.indexedDB && prefs.enabled !== false);
+  let listBootPending = hasNonFirstPage || !!(postCache && window.indexedDB && prefs.enabled !== false);
   let listFromCache = false, pendingListPage, refreshController;
   const pendingListCovers = new Map(), listPointers = new Set();
   let listActivityAt = 0, listUpdateTimer, autoRefreshTimer, pendingAutomatic = false;
@@ -233,21 +233,45 @@
   }
   async function startList() {
     if (typeof isForumRoot !== 'undefined' && isForumRoot) { listBootPending = false; scan(); return; }
-    if (!listBootPending) { scan(); return; }
-    const generation = postCache.generation;
+    if (!listBootPending && !hasNonFirstPage) { scan(); return; }
+    const generation = postCache?.generation;
     app.classList.add('list-preparing'); updateListHeading(); toggle(true); renderPager();
     let cache, cacheTimeout;
     try { cache = await Promise.race([postCache.getListPages(streamKey), new Promise(resolve => { cacheTimeout = setTimeout(() => resolve(null), 1200); })]); } catch {}
     finally { clearTimeout(cacheTimeout); app.classList.remove('list-preparing'); }
     if (coverDisposed) return;
-    const restored = generation === postCache.generation ? cachedPages(cache) : new Map();
+    const restored = generation === postCache?.generation ? cachedPages(cache) : new Map();
     listBootPending = false;
-    if (!restored.size) { refreshStatus.textContent = '列表已就绪'; scan(); observeListEnd(); return; }
-    for (const [number, page] of restored) listPages.set(number, page);
-    listCursor = [...restored.keys()].at(-1); listNext = listPages.get(listCursor).next;
-    listFromCache = true; mergeListPages(); toggle(prefs.enabled !== false); renderPager(); observeListEnd();
-    refreshStatus.textContent = '已显示缓存，正在后台更新…';
-    revalidateList();
+    if (restored.size) {
+      for (const [number, page] of restored) listPages.set(number, page);
+      listCursor = [...restored.keys()].at(-1); listNext = listPages.get(listCursor).next;
+      listFromCache = true; mergeListPages(); toggle(prefs.enabled !== false); renderPager(); observeListEnd();
+      refreshStatus.textContent = '已显示缓存，正在后台更新…';
+      revalidateList();
+      return;
+    }
+    if (hasNonFirstPage) {
+      refreshStatus.textContent = '正在加载第一页…';
+      try {
+        const page1 = await fetchListPage(pageURL.href, 1);
+        if (!coverDisposed && generation === postCache?.generation) {
+          listPages.set(1, page1);
+          listCursor = 1;
+          listNext = page1.next;
+          mergeListPages();
+          cacheListPages();
+          render();
+        }
+      } catch {
+        refreshStatus.textContent = '加载第一页失败，可点击重试';
+        listFailed = true;
+      } finally {
+        updateListControls();
+        observeListEnd();
+      }
+      return;
+    }
+    refreshStatus.textContent = '列表已就绪'; scan(); observeListEnd();
   }
   function pageSignature(page) {
     // 相对时间、分页和排序变化不代表帖子有新内容；兼容旧缓存缺省字段。

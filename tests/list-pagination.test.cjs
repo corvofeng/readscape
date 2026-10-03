@@ -159,3 +159,48 @@ test('expired list pages are discarded instead of being revived by cache hydrati
  const {w,root}=await setup({cache});
  try{for(let attempt=0;attempt<100&&w.localStorage.getItem(cacheKey)!==null;attempt++)await tick();assert.equal(root.querySelectorAll('.card').length,2);assert(!root.querySelector('.list-load').hidden);assert.equal(w.localStorage.getItem(cacheKey),null);}finally{w.close();}
 });
+
+test('thread.php ignores page parameter and always starts at page 1, fetching page 1 and paginating to page 2', async () => {
+  const nativeHTML = html([1201, 1202], 13);
+  let requested = [];
+  const fetcher = async (url) => {
+    requested.push(url);
+    const u = new URL(url);
+    const p = Number(u.searchParams.get('page') || 1);
+    if (p === 1) return response(url, html([1, 2], 2));
+    if (p === 2) return response(url, html([3, 4], 3));
+    return response(url, html([], null));
+  };
+  const d = new JSDOM(nativeHTML, {
+    url: 'https://bbs.nga.cn/thread.php?stid=47206901&page=12',
+    runScripts: 'dangerously',
+    virtualConsole: new VirtualConsole()
+  });
+  const w = d.window;
+  w.TextDecoder = TextDecoder;
+  w.fetch = fetcher;
+  w.localStorage.setItem('nga-cards-v1', JSON.stringify({ enabled: true, autoListRefresh: false }));
+  w.eval(bundle);
+  for (let i = 0; i < 100 && w.document.querySelector('#nga-cards-host')?.shadowRoot.querySelector('.grid')?.getAttribute('aria-busy') === 'true'; i++) await tick();
+  const root = w.document.querySelector('#nga-cards-host').shadowRoot;
+  try {
+    assert.doesNotMatch(w.location.href, /page=12/);
+    assert.match(w.location.href, /stid=47206901/);
+
+    const cardTids = [...root.querySelectorAll('.card')].map(c => c.dataset.tid);
+    assert.equal(cardTids.includes('1201'), false);
+    assert.equal(cardTids.includes('1202'), false);
+    assert.deepEqual(cardTids, ['1', '2']);
+    assert.match(root.querySelector('.sub').textContent, /第 1/);
+
+    root.querySelector('.list-load').click();
+    await tick();
+
+    const updatedTids = [...root.querySelectorAll('.card')].map(c => c.dataset.tid);
+    assert.deepEqual(updatedTids, ['1', '2', '3', '4']);
+    assert.match(root.querySelector('.sub').textContent, /第 1–2/);
+  } finally {
+    w.close();
+  }
+});
+
