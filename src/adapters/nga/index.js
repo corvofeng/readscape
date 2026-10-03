@@ -63,7 +63,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const savePrefs = () => write(KEY, prefs);
 
   shadow.append(node('style', '', css));
-  const app = node('div', 'app'); app.hidden = true;
+  const app = node('div', 'app'); app.hidden = true; app.tabIndex = -1;
   const top = node('header', 'top'), bar = node('div', 'bar');
   const brand = node('div', 'brand', '阅境 '); brand.append(node('span', '', '· NGA'));
   const search = node('div', 'search'), input = node('input');
@@ -275,8 +275,63 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
       chromeScroll = top;
     }
   };
+  function canScrollVertically(el, direction) {
+    if (!el || el === app || el === document.body || el === document.documentElement) return false;
+    const style = window.getComputedStyle?.(el);
+    if (!style) return false;
+    const overflowY = style.overflowY;
+    if (overflowY !== 'auto' && overflowY !== 'scroll') return false;
+    if (direction > 0) {
+      return el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+    } else {
+      return el.scrollTop > 1;
+    }
+  }
+  function handleKeyScroll(event) {
+    if (event.defaultPrevented) return;
+    if (usesDocumentScroll() || app.hidden || document.documentElement.hasAttribute('data-readscape-reader-open') || document.documentElement.hasAttribute('data-readscape-modal-open')) return;
+    if (shadow.querySelector('dialog[open]')) return;
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+    const target = path[0] || event.target;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
+      if (tag === 'BUTTON' && (event.key === ' ' || event.key === 'Spacebar')) return;
+    }
+    if (event.ctrlKey || event.altKey) return;
+    let delta = 0, toTop = false, toBottom = false;
+    if (event.metaKey) {
+      if (event.key === 'ArrowUp') toTop = true;
+      else if (event.key === 'ArrowDown') toBottom = true;
+      else return;
+    } else {
+      switch (event.key) {
+        case 'ArrowDown': delta = 80; break;
+        case 'ArrowUp': delta = -80; break;
+        case 'PageDown': delta = Math.max(100, (app.clientHeight || 600) - 60); break;
+        case 'PageUp': delta = -Math.max(100, (app.clientHeight || 600) - 60); break;
+        case ' ':
+        case 'Spacebar': delta = event.shiftKey ? -Math.max(100, (app.clientHeight || 600) - 60) : Math.max(100, (app.clientHeight || 600) - 60); break;
+        case 'Home': toTop = true; break;
+        case 'End': toBottom = true; break;
+        default: return;
+      }
+    }
+    const direction = toBottom ? 1 : toTop ? -1 : delta;
+    for (const node of path) {
+      if (node === app) break;
+      if (node && node.nodeType === 1 && canScrollVertically(node, direction)) return;
+    }
+    event.preventDefault();
+    listInteraction = true;
+    if (typeof markListActivity === 'function') markListActivity();
+    if (toTop) app.scrollTop = 0;
+    else if (toBottom) app.scrollTop = app.scrollHeight;
+    else app.scrollTop += delta;
+  }
+  window.addEventListener('keydown', handleKeyScroll, { passive: false });
   window.addEventListener('scroll', updateReadingChrome, {passive:true});
-  window.addEventListener('pagehide', () => { mobileViewport?.removeEventListener('change', updateScrollMode); window.removeEventListener('scroll', updateReadingChrome); });
+  window.addEventListener('pagehide', () => { mobileViewport?.removeEventListener('change', updateScrollMode); window.removeEventListener('scroll', updateReadingChrome); window.removeEventListener('keydown', handleKeyScroll); });
   function setViewport(enabled) {
     if (enabled) {
       viewport.content = 'width=device-width, initial-scale=1, viewport-fit=cover';

@@ -33,11 +33,17 @@ function createNavigation(config, context = globalThis.window) {
         background.list.scrollTop = background.documentMode ? background.documentScroll.top : background.listScroll;
       }
     }
-    if (background.shown && background.focus?.isConnected) background.focus.focus({ preventScroll: true });
+    if (background.shown) {
+      if (background.focus?.isConnected && typeof background.focus.focus === 'function') {
+        background.focus.focus({ preventScroll: true });
+      } else if (background.list?.isConnected && typeof background.list.focus === 'function') {
+        background.list.focus({ preventScroll: true });
+      }
+    }
     background = null;
     document.dispatchEvent(new document.defaultView.Event('readscape-list-resume'));
   }
-  function openReader(u, restoring = false) {
+  function openReader(u, restoring = false, opener = null) {
     disposeBackground(); finish();
     const frame = document.createElement('iframe');
     frame.dataset.readscapeReader = 'true'; frame.dataset.readscapeListURL = (restoring && history.state?.readscapeListURL) || location.href; frame.title = '帖子与评论';
@@ -51,7 +57,9 @@ function createNavigation(config, context = globalThis.window) {
     const cancel = document.createElement('button'); cancel.textContent = '取消';
     cancel.onclick = () => { if (restoring) history.back(); else disposeBackground(); };
     notice.append(label, original, cancel);
-    const state = background = { frame, notice, url: u.href, title: document.title, focus: document.activeElement };
+    const activeEl = document.getElementById('nga-cards-host')?.shadowRoot?.activeElement || document.activeElement;
+    const initialFocus = (opener && opener.isConnected) ? opener : activeEl;
+    const state = background = { frame, notice, url: u.href, title: document.title, focus: initialFocus };
     const fail = () => {
       if (background !== state) return;
       disposeBackground();
@@ -102,6 +110,7 @@ function createNavigation(config, context = globalThis.window) {
         }
         state.shown = true; document.title = doc.title;
         notice.remove(); frame.focus({ preventScroll: true });
+        try { frame.contentWindow?.focus(); reader?.focus?.({ preventScroll: true }); } catch {}
       } catch { fail(); }
     }, 100);
     state.timeout = setTimeout(fail, 15000);
@@ -158,7 +167,7 @@ function createNavigation(config, context = globalThis.window) {
     }
     const list = document.getElementById('nga-cards-host')?.shadowRoot?.querySelector('.app:not(.reader)');
     if (!framed && list && !list.hidden && /\/read\.php$/.test(u.pathname)) {
-      event.preventDefault(); openReader(u); return;
+      event.preventDefault(); openReader(u, false, a); return;
     }
     try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), origin: u.origin })); } catch {}
     show();
