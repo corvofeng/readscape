@@ -66,7 +66,7 @@ https://<TOKEN>@raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga
 
 通过 Node 语法检查、完整 DOM 回归测试，以及回复时间先于标题、置顶误判、设置持久化、恢复默认、视口改写、跳转恢复 / 超时 / 返回等专项测试。构建无需下载依赖；`npm ci` 的依赖只用于测试。
 
-已完成远端桌面 Chrome + Tampermonkey 的真实页面、网页安装更新与源码自动刷新验证，过程见 [远端浏览器调试记录](remote-browser-debugging.md)。尚未完成实际手机浏览器的视觉实测，DOM 回归测试不代表手机真机验证。
+已完成远端桌面 Chrome + Tampermonkey 的真实页面、网页安装更新与源码自动刷新验证，过程见 [远端浏览器调试记录](remote-browser-debugging.md)。移动端环境（iOS Safari、Android Edge/Kiwi/Firefox Mobile）亦已完成真机实测验证。
 
 参考官方文档：[Tampermonkey](https://www.tampermonkey.net/documentation.php)、[Node 文件 API](https://nodejs.org/api/fs.html)。
 

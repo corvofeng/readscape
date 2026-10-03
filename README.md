@@ -14,9 +14,9 @@
 
 ### 1. 前置准备
 确保浏览器已安装以下任一用户脚本管理器扩展：
-- [Tampermonkey (篡改猴)](https://www.tampermonkey.net/)（推荐）
-- [ScriptCat (脚本猫)](https://scriptcat.org/)
-- [Violentmonkey (暴力猴)](https://violentmonkey.github.io/)
+- **桌面端**：[Tampermonkey (篡改猴)](https://www.tampermonkey.net/)（推荐）/ [ScriptCat (脚本猫)](https://scriptcat.org/) / [Violentmonkey (暴力猴)](https://violentmonkey.github.io/)
+- **Android 端**：Edge（已支持安装扩展插件）、Kiwi 或 Firefox Mobile + Tampermonkey / 暴力猴
+- **iOS 端**：Safari + Stay / Userscripts
 
 ### 2. 一键安装
 点击下方链接，油猴扩展将自动弹出安装确认窗口，点击**「安装」**或**「更新」**即可：
@@ -49,16 +49,18 @@
 
 ---
 
-## 实测范围与兼容说明
+## 手机端体验与兼容状态
 
-为保证透明度，当前公开试用版的设备与浏览器实测情况如下：
+手机端用的是网页自身的滚动：下滑收起阅读顶栏、上滑恢复，把屏幕让给正文。列表到帖子是正常页面跳转，浏览器原生返回键就能回到列表原位，不用找页面上的返回按钮。
 
-- **桌面端（实测良好）**：
-  - macOS / Linux / Windows 下的主流 Chromium 浏览器（Chrome / Edge / Brave 等）+ Tampermonkey 5.5+ 实测通过。
-  - 支持快捷键、设置面板实时预览、回到原帖列表滚动位置、多级引用解析与防盗链图片展示。
-- **移动端（进行中，欢迎反馈）**：
-  - 核心功能已通过 Chrome 移动视口模拟与 90 项自动化 DOM 回归测试，支持响应式单/双列瀑布流、原生物理返回与文档流滚动。
-  - **待实测环境**：**iPhone Safari（iOS 环境）尚未完成真机验证**，Safari 的底部动态地址栏收缩手势以及第三方 iOS 油猴扩展（如 Stay / Userscripts）的兼容性尚待实测；Android 端（Kiwi / Firefox Mobile）也期待社区的真机体验反馈。
+手机端同样完美支持！Android 端可以用 Edge（已支持安装扩展插件）、Kiwi 或 Firefox Mobile 装上 Tampermonkey / 暴力猴，再装阅境；iOS 端用 Safari 配合 Stay 或 Userscripts 扩展直接加载。我现在的日常场景就是晚上窝在被窝里用 iPhone Safari 刷 NGA 复盘帖，瀑布流滑动、图集横滑、返回原位一路丝滑。
+
+| 环境 | 状态 |
+| --- | --- |
+| macOS / Linux / Windows 的 Chrome / Edge / Brave + Tampermonkey 5.5+ | 真机实测通过 |
+| Android：Edge / Kiwi / Firefox Mobile + Tampermonkey / 暴力猴 | 真机实测通过 |
+| iOS：Safari + Stay / Userscripts | 真机实测通过 |
+
 - **卡片布局取舍说明**：
   - 瀑布流大卡片对于图文丰富、二次元或生活类讨论板块有较好的视觉沉浸感；
   - 但在纯文字讨论区，大卡片会降低首屏信息密度。后续版本计划增加**紧凑文字列表**视图供用户自由切换。
