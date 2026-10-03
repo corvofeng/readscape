@@ -41,7 +41,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const isForumRoot = /^\/(?:index\.php|forum\.php)?$/.test(pageURL.pathname) && !pageURL.searchParams.has('fid') && !pageURL.searchParams.has('stid') && !pageURL.searchParams.has('tid');
   let cardObserver, listObserver;
   const listCards = new Map();
-  let coverDisposed = false;
+  let coverDisposed = false, readerApp = null;
   let gateHandled = false, gateTimer;
   let modeToggle = toggle;
   let settingsRefresh = render;
@@ -276,7 +276,8 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     }
   };
   function canScrollVertically(el, direction) {
-    if (!el || el === app || el === document.body || el === document.documentElement) return false;
+    const currentApp = (readerApp && !readerApp.hidden) ? readerApp : app;
+    if (!el || el === currentApp || el === document.body || el === document.documentElement) return false;
     const style = window.getComputedStyle?.(el);
     if (!style) return false;
     const overflowY = style.overflowY;
@@ -289,7 +290,8 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   }
   function handleKeyScroll(event) {
     if (event.defaultPrevented) return;
-    if (usesDocumentScroll() || app.hidden || document.documentElement.hasAttribute('data-readscape-reader-open') || document.documentElement.hasAttribute('data-readscape-modal-open')) return;
+    const currentApp = (readerApp && !readerApp.hidden) ? readerApp : app;
+    if (usesDocumentScroll() || currentApp.hidden || document.documentElement.hasAttribute('data-readscape-reader-open') || document.documentElement.hasAttribute('data-readscape-modal-open')) return;
     if (shadow.querySelector('dialog[open]')) return;
     const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
     const target = path[0] || event.target;
@@ -308,10 +310,10 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
       switch (event.key) {
         case 'ArrowDown': delta = 80; break;
         case 'ArrowUp': delta = -80; break;
-        case 'PageDown': delta = Math.max(100, (app.clientHeight || 600) - 60); break;
-        case 'PageUp': delta = -Math.max(100, (app.clientHeight || 600) - 60); break;
+        case 'PageDown': delta = Math.max(100, (currentApp.clientHeight || 600) - 60); break;
+        case 'PageUp': delta = -Math.max(100, (currentApp.clientHeight || 600) - 60); break;
         case ' ':
-        case 'Spacebar': delta = event.shiftKey ? -Math.max(100, (app.clientHeight || 600) - 60) : Math.max(100, (app.clientHeight || 600) - 60); break;
+        case 'Spacebar': delta = event.shiftKey ? -Math.max(100, (currentApp.clientHeight || 600) - 60) : Math.max(100, (currentApp.clientHeight || 600) - 60); break;
         case 'Home': toTop = true; break;
         case 'End': toBottom = true; break;
         default: return;
@@ -319,15 +321,15 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     }
     const direction = toBottom ? 1 : toTop ? -1 : delta;
     for (const node of path) {
-      if (node === app) break;
+      if (node === currentApp) break;
       if (node && node.nodeType === 1 && canScrollVertically(node, direction)) return;
     }
     event.preventDefault();
     listInteraction = true;
     if (typeof markListActivity === 'function') markListActivity();
-    if (toTop) app.scrollTop = 0;
-    else if (toBottom) app.scrollTop = app.scrollHeight;
-    else app.scrollTop += delta;
+    if (toTop) currentApp.scrollTop = 0;
+    else if (toBottom) currentApp.scrollTop = currentApp.scrollHeight;
+    else currentApp.scrollTop += delta;
   }
   window.addEventListener('keydown', handleKeyScroll, { passive: false });
   window.addEventListener('scroll', updateReadingChrome, {passive:true});
@@ -631,6 +633,159 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   /* BBCODE_MODULE */
   /* READER_MODULE */
   if (/\/read\.php$/.test(pageURL.pathname)) { startReader(); return; }
+
+  let savedListScroll = 0, savedListTitle = '', activeReaderInstance = null, currentReaderURL = null, activeReaderTitle = '', currentOpener = null;
+
+  function isDeletedDoc(doc) {
+    if (!doc) return false;
+    if (doc.querySelector?.('.postcontent, [id^="postcontent"], #postcontainer0')) return false;
+    const title = (doc.title || '').trim();
+    const text = doc.body?.textContent || '';
+    return /ERROR:\s*62/i.test(text) || /ERROR:\s*62/i.test(title) ||
+      title === '帖子被删除' || title === '主题被删除' ||
+      /(?:ERROR:\s*62\s*\)?\s*>\s*)?帖子(?:不存在或)?(?:已[被经]|被)?删除/.test(text);
+  }
+
+  function canUseSPA() {
+    return typeof window.fetch === 'function' && prefs.enabled !== false && prefs.smoothNavigation !== false && prefs.spaReader !== false;
+  }
+
+  function openReaderSPA(url, restoring = false, opener = null) {
+    if (!canUseSPA()) return false;
+    currentOpener = opener;
+    const tid = url.searchParams.get('tid');
+    if (!tid) return false;
+
+    if (restoring && activeReaderInstance && currentReaderURL?.href === url.href && readerApp) {
+      app.style.display = 'none';
+      app.inert = true;
+      readerApp.style.display = '';
+      readerApp.hidden = false;
+      document.title = activeReaderTitle || document.title;
+      readerApp.focus({ preventScroll: true });
+      return true;
+    }
+
+    let notice = shadow.querySelector('.spa-loading-notice');
+    if (!notice) {
+      notice = node('div', 'spa-loading-notice', '正在加载帖子…');
+      notice.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2147483015;padding:8px 20px;border-radius:20px;background:#fff;color:#ff2442;box-shadow:0 4px 20px #00000026;font:13px system-ui;font-weight:600;display:flex;align-items:center;gap:8px;pointer-events:none;animation:card-appear .2s ease-out';
+      shadow.append(notice);
+    }
+
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 12000);
+
+    fetch(url.href, { credentials: 'same-origin', signal: controller.signal })
+      .then(async response => {
+        clearTimeout(fetchTimeout);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        let bytes;
+        if (typeof response.arrayBuffer === 'function') {
+          bytes = new Uint8Array(await response.arrayBuffer());
+        } else if (typeof response.text === 'function') {
+          bytes = new TextEncoder().encode(await response.text());
+        } else {
+          throw new Error('Unsupported response body');
+        }
+        const initial = new TextDecoder('utf-8').decode(bytes);
+        const encoding = response.headers?.get?.('content-type')?.match(/charset\s*=\s*([\w-]+)/i)?.[1] || initial.slice(0, 4096).match(/charset\s*=\s*["']?([\w-]+)/i)?.[1] || 'utf-8';
+        const doc = new DOMParser().parseFromString(new TextDecoder(encoding).decode(bytes), 'text/html');
+
+        if (isDeletedDoc(doc)) {
+          document.dispatchEvent(new (window.CustomEvent || CustomEvent)('readscape-post-deleted', {
+            detail: { tid, url: url.href, reason: '帖子被删除' }
+          }));
+          return;
+        }
+
+        if (doc.title === '访客不能直接访问') {
+          location.assign(url.href);
+          return;
+        }
+
+        if (!doc.querySelector?.('.postcontent, [id^="postcontent"], #postcontainer0')) {
+          location.assign(url.href);
+          return;
+        }
+
+        activateSPAReader(url, doc, opener);
+      })
+      .catch(() => {
+        clearTimeout(fetchTimeout);
+        notice?.remove();
+        location.assign(url.href);
+      });
+
+    return true;
+  }
+
+  function activateSPAReader(url, doc, opener) {
+    if (!readerApp) {
+      readerApp = node('div', 'app reader');
+      readerApp.tabIndex = -1;
+      shadow.append(readerApp);
+    }
+    currentOpener = opener;
+    currentReaderURL = url;
+    savedListScroll = getReadingScroll();
+    savedListTitle = document.title;
+
+    app.style.display = 'none';
+    app.inert = true;
+
+    readerApp.style.display = '';
+    readerApp.hidden = false;
+
+    history.pushState({ readscapeSPA: true, tid: url.searchParams.get('tid'), listURL: location.href }, '', url.href);
+
+    activeReaderInstance = startReader({
+      targetURL: url,
+      container: readerApp,
+      initialDoc: doc,
+      onBack: () => history.back()
+    });
+
+    activeReaderTitle = readerApp.querySelector('h1')?.textContent || doc.title.replace(/\s*NGA玩家社区.*$/, '');
+    document.title = activeReaderTitle;
+    readerApp.focus({ preventScroll: true });
+    readerApp.scrollTop = 0;
+  }
+
+  function returnFromSPAReader() {
+    if (!readerApp || readerApp.hidden) return;
+    readerApp.style.display = 'none';
+    readerApp.hidden = true;
+    readerApp.replaceChildren();
+    activeReaderInstance?.destroy?.();
+    activeReaderInstance = null;
+    currentReaderURL = null;
+
+    app.style.display = '';
+    app.inert = false;
+    document.title = savedListTitle || document.title;
+    setReadingScroll(savedListScroll);
+    readingSettings?.setActions([]);
+
+    if (currentOpener?.isConnected && typeof currentOpener.focus === 'function') {
+      currentOpener.focus({ preventScroll: true });
+    } else {
+      app.focus({ preventScroll: true });
+    }
+    currentOpener = null;
+  }
+
+  function onPopStateSPA(event) {
+    if (readerApp && !readerApp.hidden) {
+      if (!event.state?.readscapeSPA) {
+        returnFromSPAReader();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  navigation.setSPAReader?.({ openReader: openReaderSPA, onPopState: onPopStateSPA });
   startList(); configureListRefresh();
   // 列表由 NGA 后续脚本生成时再扫描，不覆盖登录/错误页。
   const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(scan, 220); });

@@ -1,25 +1,36 @@
-  function startReader() {
-    const tid = pageURL.searchParams.get('tid');
-    postCache?.visit({ tid, url: pageURL.href });
+  function startReader(options = {}) {
+    const targetURL = options.targetURL || pageURL;
+    const container = options.container || app;
+    const tid = targetURL.searchParams.get('tid');
+    postCache?.visit({ tid, url: targetURL.href });
     const pages = new Map(), records = new Map(), cards = new Map(), nextPages = new Map();
     let previousCards = new Map();
     let initialSignature = '', busy = false, ended = false, scanTimer, cursor;
-    const nativePage = Number(pageURL.searchParams.get('page')) || 1;
+    const nativePage = Number(targetURL.searchParams.get('page')) || 1;
     cursor = nativePage;
     const canonical = (page = nativePage) => {
-      const u = new URL(pageURL.href);
+      const u = new URL(targetURL.href);
       ['rand', 'topid', 'pid'].forEach(k => u.searchParams.delete(k));
       u.searchParams.set('page', String(page)); u.hash = ''; return u;
     };
-    const style = node('style', '', /* READER_CSS */);
-    shadow.append(style);
-    app.classList.add('reader');
+    if (!shadow.querySelector('style[data-readscape-reader]')) {
+      const style = node('style', '', /* READER_CSS */);
+      style.dataset.readscapeReader = 'true';
+      shadow.append(style);
+    }
+    container.classList.add('reader');
+    container.tabIndex = -1;
     const rtop = node('header', 'top'), rbar = node('div', 'bar');
     const rrestore = button('优雅阅读', 'restore', () => setMode(true)); rrestore.hidden = true;
     const rmain = node('main'), rhead = node('div', 'reader-head');
-    const rtitle = node('h1', '', document.title.replace(/\s*NGA玩家社区.*$/, ''));
+    const rtitle = node('h1', '', (options.initialDoc?.querySelector?.('#postsubject0')?.textContent.trim() || options.initialDoc?.title || document.title).replace(/\s*NGA玩家社区.*$/, ''));
     const rsub = node('div', 'sub', '按原站分页阅读 · 引用默认折叠');
     rhead.append(rtitle, rsub);
+    if (options.onBack) {
+      const backBtn = button('‹ 列表', 'pill reader-back-btn', options.onBack);
+      backBtn.setAttribute('aria-label', '返回帖子列表');
+      rbar.append(backBtn);
+    }
     rbar.append(node('div', 'brand', 'NGA · 阅读'), node('div', 'spacer'), accountStatus);
     const readerMenu = mobileOptions.cloneNode(true);
     readerMenu.setAttribute('aria-label', '阅读设置与账号'); readerMenu.removeAttribute('aria-expanded');
@@ -38,11 +49,11 @@
     });
     const footer = node('div', 'reader-footer');
     bottom.append(load, endMarker, status, footer);
-    rmain.append(rhead, stream, bottom); app.replaceChildren(rtop, rmain);
+    rmain.append(rhead, stream, bottom); container.replaceChildren(rtop, rmain);
     const [replyEntry, dockCount] = readingSettings.setActions([
-      { label: '回复帖子', className: 'reply-entry', href: () => postURL(document, location.href).href, target: '_blank' },
+      { label: '回复帖子', className: 'reply-entry', href: () => postURL(options.initialDoc || document, targetURL.href).href, target: '_blank' },
       { label: '评论', className: 'dock-count', action: () => stream.querySelector('.comment:not(.op)')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) },
-      { label: '回到顶部', className: 'dock-top', action: () => scrollReadingTo({ top: 0, behavior: 'smooth' }) }
+      { label: '回到顶部', className: 'dock-top', action: () => (usesDocumentScroll() ? window : container).scrollTo({ top: 0, behavior: 'smooth' }) }
     ]);
     accountChanged = info => {
       replyEntry.hidden = !info;
@@ -50,7 +61,9 @@
       for (const card of cards.values()) syncCommentActions(card, card.readerPost, !!info);
     };
     accountChanged(currentAccount());
-    restore.remove(); shadow.append(rrestore);
+    if (!options.container) {
+      restore.remove(); shadow.append(rrestore);
+    }
     modeToggle = setMode;
     settingsRefresh = renderReader;
 
@@ -58,11 +71,11 @@
       const readingPosition = getReadingScroll();
       if (!enabled) closeViewer();
       prefs.enabled = enabled; savePrefs();
-      app.hidden = !enabled || !pages.size; rrestore.hidden = enabled || !pages.size;
-      setViewport(!app.hidden);
-      setSurface(!app.hidden, readingPosition);
-      readingSettings?.visibility(!app.hidden);
-      if (!app.hidden) navigation.finish();
+      container.hidden = !enabled || !pages.size; rrestore.hidden = enabled || !pages.size;
+      setViewport(!container.hidden);
+      setSurface(!container.hidden, readingPosition);
+      readingSettings?.visibility(!container.hidden);
+      if (!container.hidden) navigation.finish();
     }
 
     function postURL(doc, base, post, action = 'reply') {
@@ -543,24 +556,48 @@
       } finally { clearTimeout(timeout); busy = false; renderReader(); }
     }
 
-    updateNative();
-    const restoreGeneration = postCache?.generation;
-    postCache?.getReplyPage(tid,nativePage).then(cached => {
-      if (pages.size || coverDisposed || restoreGeneration !== postCache.generation) return;
-      const restored = restorePage(cached); if (!restored.length) return;
-      cursor = nativePage; pages.set(nativePage,restored); nextPages.set(nativePage,cached.next); rtitle.textContent = cached.title || rtitle.textContent;
-      rebuildRecords(); renderReader(); setMode(!!prefs.enabled); status.textContent = '正在阅读本地缓存';
-    });
-    const nativeObserver = new MutationObserver(() => { clearTimeout(scanTimer); scanTimer = setTimeout(updateNative, 250); });
-    nativeObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    let nativeObserver;
+    const initialPosts = options.initialPosts || (options.initialDoc ? parsePosts(options.initialDoc, targetURL.href) : null);
+    if (initialPosts && initialPosts.length) {
+      cursor = nativePage;
+      pages.set(nativePage, initialPosts);
+      rebuildRecords();
+      rtitle.textContent = options.initialDoc?.querySelector?.('#postsubject0')?.textContent.trim() || options.initialDoc?.title?.replace(/\s*NGA玩家社区.*$/, '') || rtitle.textContent;
+      nextPages.set(nativePage, detectNextPage(options.initialDoc || document, nativePage, targetURL.href));
+      renderReader();
+      setMode(!!prefs.enabled);
+    } else {
+      updateNative();
+      const restoreGeneration = postCache?.generation;
+      postCache?.getReplyPage(tid,nativePage).then(cached => {
+        if (pages.size || coverDisposed || restoreGeneration !== postCache.generation) return;
+        const restored = restorePage(cached); if (!restored.length) return;
+        cursor = nativePage; pages.set(nativePage,restored); nextPages.set(nativePage,cached.next); rtitle.textContent = cached.title || rtitle.textContent;
+        rebuildRecords(); renderReader(); setMode(!!prefs.enabled); status.textContent = '正在阅读本地缓存';
+      });
+      nativeObserver = new MutationObserver(() => { clearTimeout(scanTimer); scanTimer = setTimeout(updateNative, 250); });
+      nativeObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
     const userSignature = () => {
-      const table = readNGAUserData(document, window);
+      const table = readNGAUserData(options.initialDoc || document, window);
       return JSON.stringify([Object.entries(table.users).map(([uid,u]) => [uid,u.username,u.avatar,u.regdate,u.memberid,u.groupid,u.rvrc,u.money,u.postnum]),table.groups]);
     };
     let lastUsers = userSignature();
     const userRefresh = window.setInterval(() => {
-      const signature = userSignature();
-      if (signature !== lastUsers) { lastUsers = signature; updateNative(); }
+      if (!options.initialPosts) {
+        const signature = userSignature();
+        if (signature !== lastUsers) { lastUsers = signature; updateNative(); }
+      }
     }, 1200);
-    window.addEventListener('pagehide', () => { window.clearInterval(userRefresh); nativeObserver.disconnect(); clearTimeout(scanTimer); clearTimeout(gateTimer); });
+    window.addEventListener('pagehide', () => { window.clearInterval(userRefresh); nativeObserver?.disconnect?.(); clearTimeout(scanTimer); clearTimeout(gateTimer); });
+
+    return {
+      destroy() {
+        closeViewer();
+        if (scanTimer) clearTimeout(scanTimer);
+        nativeObserver?.disconnect?.();
+        window.clearInterval(userRefresh);
+      },
+      title: rtitle.textContent
+    };
   }

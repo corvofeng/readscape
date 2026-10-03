@@ -5,7 +5,7 @@ const { IDBFactory } = require('fake-indexeddb');
 const fs = require('node:fs');
 const bundle = fs.readFileSync(__dirname + '/../dist/readscape-nga.user.js', 'utf8');
 const tick = () => new Promise(resolve => setTimeout(resolve, 25));
-async function setup({ factory = new IDBFactory(), savedScroll, fetcher, automatic = false, clock } = {}) {
+async function setup({ factory = new IDBFactory(), savedScroll, fetcher, automatic = false, clock, spaReader = false } = {}) {
   const body = '<table>' + [1, 2, 3, 4].map(tid => `<tr><td class="c2"><a class="topic" href="/read.php?tid=${tid}">帖子 ${tid}</a></td></tr>`).join('') + '</table>';
   const d = new JSDOM('<head></head><body>' + body + '</body>', { url: 'https://bbs.nga.cn/thread.php?fid=1', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = d.window;
@@ -34,7 +34,7 @@ async function setup({ factory = new IDBFactory(), savedScroll, fetcher, automat
   w.ResizeObserver = class { constructor(fn) { resize = fn; } observe() {} unobserve() {} disconnect() {} };
   const computed = w.getComputedStyle.bind(w);
   w.getComputedStyle = el => el.classList.contains('grid') ? { gridTemplateColumns: '180px 180px' } : computed(el);
-  w.localStorage.setItem('nga-cards-v1', JSON.stringify({ enabled: true, autoListRefresh: automatic }));
+  w.localStorage.setItem('nga-cards-v1', JSON.stringify({ enabled: true, autoListRefresh: automatic, spaReader }));
  w.eval(bundle);
   for (let i = 0; i < 100 && w.document.getElementById('nga-cards-host').shadowRoot.querySelector('.grid').getAttribute('aria-busy') === 'true'; i++) await tick();
   const root = w.document.getElementById('nga-cards-host').shadowRoot;

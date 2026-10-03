@@ -2,7 +2,7 @@ function createNavigation(config, context = globalThis.window) {
   const window = context;
   const { document, location, history, localStorage, sessionStorage } = window;
   const key = 'reader-toolkit-transition';
-  let veil, timeout, background, scrollRestoration;
+  let veil, timeout, background, scrollRestoration, spaHandlers = {};
   const framed = window.top !== window.self;
   function safeTid(raw) { try { return new URL(raw, location.href).searchParams.get('tid'); } catch { return null; } }
   function isDeletedDoc(doc) {
@@ -116,6 +116,7 @@ function createNavigation(config, context = globalThis.window) {
     state.timeout = setTimeout(fail, 15000);
   }
   function onPopState(event) {
+    if (spaHandlers.onPopState && spaHandlers.onPopState(event)) return;
     disposeBackground(); finish();
     const url = event.state?.readscapeReader;
     if (typeof url !== 'string' || !enabled()) return;
@@ -167,12 +168,26 @@ function createNavigation(config, context = globalThis.window) {
     }
     const list = document.getElementById('nga-cards-host')?.shadowRoot?.querySelector('.app:not(.reader)');
     if (!framed && list && !list.hidden && /\/read\.php$/.test(u.pathname)) {
-      event.preventDefault(); openReader(u, false, a); return;
+      event.preventDefault();
+      if (spaHandlers.openReader && spaHandlers.openReader(u, false, a)) return;
+      openReader(u, false, a); return;
     }
     try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), origin: u.origin })); } catch {}
     show();
   }
   document.addEventListener('click', capture);
   window.addEventListener('pageshow', e => { if (e.persisted) finish(); });
-  return { finish, show, destroy() { disposeBackground(); finish(); if (scrollRestoration !== undefined) history.scrollRestoration = scrollRestoration; document.removeEventListener('click', capture); window.removeEventListener('popstate', onPopState); } };
+  return {
+    finish,
+    show,
+    setSPAReader(handlers) { spaHandlers = handlers || {}; },
+    destroy() {
+      spaHandlers = {};
+      disposeBackground();
+      finish();
+      if (scrollRestoration !== undefined) history.scrollRestoration = scrollRestoration;
+      document.removeEventListener('click', capture);
+      window.removeEventListener('popstate', onPopState);
+    }
+  };
 }
