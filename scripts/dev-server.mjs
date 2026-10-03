@@ -47,8 +47,13 @@ function build() {
 }
 if (!build()) process.exit(1);
 
-function header(extra) {
-  return bundle.slice(0, bundle.indexOf('// ==/UserScript==')).trimEnd() + '\n' + extra.join('\n') + '\n// ==/UserScript==\n';
+function header(extra, isDev = false) {
+  let meta = bundle.slice(0, bundle.indexOf('// ==/UserScript==')).trimEnd();
+  if (isDev) {
+    meta = meta.replace(/(\/\/\s*@name\s+)(.+)/, '$1$2 (Dev)');
+    meta = meta.replace(/(\/\/\s*@description\s+)(.+)/, '$1[开发联调] $2');
+  }
+  return meta + '\n' + extra.join('\n') + '\n// ==/UserScript==\n';
 }
 function loader() {
   return header([
@@ -56,7 +61,7 @@ function loader() {
     `// @connect      ${origin.hostname}`,
     `// @downloadURL  ${base}/__monkey.user.js`,
     `// @updateURL    ${base}/__monkey.user.js`,
-  ]) + `
+  ], true) + `
 (() => {
   'use strict';
   if (window.top !== window.self) return;
@@ -96,8 +101,8 @@ function release() {
 }
 const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>阅境开发服务</title>
 <style>body{max-width:680px;margin:70px auto;padding:24px;font:16px/1.8 system-ui;color:#242424;background:#f7f7fa}a{color:#c92346}h1{font-size:30px}section{background:white;border-radius:20px;padding:24px;margin:20px 0}code{background:#eee;padding:3px 6px;border-radius:5px}</style>
-<h1>阅境开发服务</h1><section><h2>开发联调</h2><p><a href="/__monkey.user.js">安装 / 更新开发脚本</a></p><p>安装后打开 NGA 页面。保存 src 下的源码或样式后，页面会自动刷新并加载最新代码。开发期间保持此服务运行。</p></section>
-<section><h2>正式使用</h2><p><a href="/readscape-${id}.user.js">安装 / 更新正式脚本</a></p><p>正式脚本安装后可独立运行。同名脚本会替换开发脚本，保留已有设置和收藏。</p></section></html>`;
+<h1>阅境开发服务</h1><section><h2>开发联调</h2><p><a href="/__monkey.user.js">安装 / 更新开发脚本 (Dev)</a></p><p>安装后在油猴中显示为 <strong>阅境 · NGA (Dev)</strong>。保存 src 下的源码或样式后，页面会自动刷新并加载最新代码。开发期间保持此服务运行。</p></section>
+<section><h2>正式使用</h2><p><a href="/readscape-${id}.user.js">安装 / 更新正式脚本</a></p><p>安装后在油猴中显示为 <strong>阅境 · NGA</strong>。开发脚本与正式脚本名称不同，可同时安装在油猴中，互不覆盖，方便随时按需开关切换。</p></section></html>`;
 const server = createServer((req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   const send = (status, type, body) => {

@@ -271,3 +271,23 @@ test('a new cover waits behind the reader and applies to the same card after ret
     assert.equal(card.querySelector('img').src, 'https://img.nga.cn/new-after-reading.png');
   } finally { cache?.close(); w.close(); }
 });
+
+test('a new cover applies automatically after returning even with autoListRefresh disabled', async () => {
+  const { w, root } = await setup({ automatic: false }); let cache;
+  try {
+    w.eval(fs.readFileSync(__dirname + '/../src/core/post-cache.js', 'utf8') + ';window.createPostCache = createPostCache;');
+    cache = w.createPostCache({ context: w, key: 'nga-cards-v1' });
+    const card = root.querySelector('.card');
+    root.querySelector('.app').dispatchEvent(new w.Event('wheel', { bubbles: true }));
+    const frame = w.document.createElement('iframe'); frame.dataset.readscapeReader = 'true'; w.document.documentElement.append(frame);
+    await cache.saveCover('1', 'https://img.nga.cn/manual-auto-apply.png', { coverW: 640, coverH: 1407 });
+    await wait(100);
+    assert.equal(card.querySelector('img'), null);
+    frame.remove();
+    w.document.dispatchEvent(new w.Event('readscape-list-resume'));
+    await wait(50);
+    assert.equal(card.querySelector('img')?.src, 'https://img.nga.cn/manual-auto-apply.png');
+    assert.equal(root.querySelector('.list-refresh').hidden, true, '不应强制用户点击刷新按钮');
+    assert(!root.querySelector('.list-refresh-bar').classList.contains('has-update'));
+  } finally { cache?.close(); w.close(); }
+});

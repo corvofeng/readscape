@@ -13,14 +13,18 @@
   ],
   "paths": [
     "/thread.php",
-    "/read.php"
+    "/read.php",
+    "/forum.php",
+    "/index.php",
+    "/"
   ],
   "modules": {
     "LIST_MODULE": "list.js",
     "READER_MODULE": "reader.js",
     "ACCOUNT_MODULE": "account.js",
     "PROFILE_MODULE": "profile.js",
-    "BBCODE_MODULE": "bbcode.js"
+    "BBCODE_MODULE": "bbcode.js",
+    "BOARDS_MODULE": "boards.js"
   },
   "styles": {
     "LIST_CSS": "list.css",

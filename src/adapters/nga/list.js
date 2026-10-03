@@ -12,11 +12,39 @@
   function listCanUpdate() {
     return !coverDisposed && !app.hidden && !document.hidden && !readerCoversList() && !listPointers.size && !pullStart && !listBusy && !app.classList.contains('rt-settings-open') && Date.now() - listActivityAt >= 650;
   }
+  function applyListCovers() {
+    if (!pendingListCovers.size || coverDisposed) return;
+    const position = getReadingScroll();
+    const anchor = [...grid.children].find(card => card.getBoundingClientRect().bottom > top.getBoundingClientRect().bottom);
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    const before = new Map([...grid.children].map(card => [card.dataset.tid, { card, html: card.innerHTML }]));
+    for (const [tid, cached] of pendingListCovers) {
+      const card = listCards.get(tid)?.card;
+      if (card?.isConnected) setCardCover(card, cached);
+    }
+    pendingListCovers.clear(); layoutMasonry();
+    if (position <= 2) setReadingScroll(0);
+    else if (anchor?.isConnected) setReadingScroll(position + anchor.getBoundingClientRect().top - anchorTop);
+    for (const card of grid.children) {
+      const old = before.get(card.dataset.tid);
+      if (old && old.html !== card.innerHTML) {
+        card.classList.remove('card-updated'); void card.offsetWidth; card.classList.add('card-updated');
+        card.addEventListener('animationend', () => card.classList.remove('card-updated'), { once: true });
+      }
+    }
+    if (!pendingListPage) {
+      refreshBar.classList.remove('has-update');
+      refreshButton.hidden = true;
+    }
+  }
   function queueListCover(card, cached) {
     pendingListCovers.set(card.dataset.tid, cached);
-    pendingAutomatic = prefs.autoListRefresh !== false;
-    if (pendingAutomatic) scheduleListUpdate();
-    else { refreshBar.classList.add('has-update'); refreshButton.hidden = false; refreshStatus.textContent = '封面有更新'; }
+    if (!readerCoversList() && !listInteraction) {
+      applyListCovers();
+    } else if (prefs.autoListRefresh !== false) {
+      pendingAutomatic = true;
+      scheduleListUpdate();
+    }
   }
   function scheduleListUpdate() {
     clearTimeout(listUpdateTimer);
@@ -38,9 +66,87 @@
     if (pendingListPage || pendingListCovers.size) { pendingAutomatic = true; scheduleListUpdate(); }
   }
   document.addEventListener('visibilitychange', () => { configureListRefresh(); scheduleListUpdate(); });
-  window.addEventListener('pageshow', configureListRefresh);
-  document.addEventListener('readscape-list-resume', () => { listPointers.clear(); listActivityAt = Date.now() + 600; scheduleListUpdate(); });
-  window.addEventListener('popstate', () => { listActivityAt = Date.now() + 600; scheduleListUpdate(); });
+  window.addEventListener('pageshow', () => { applyListCovers(); configureListRefresh(); });
+  document.addEventListener('readscape-list-resume', () => { listPointers.clear(); applyListCovers(); listActivityAt = Date.now() + 600; scheduleListUpdate(); });
+  function showNotice(message, title = '提示') {
+    let dialog = app.querySelector('.notice-dialog');
+    if (!dialog) {
+      dialog = node('dialog', 'notice-dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-label', title);
+      const head = node('div', 'notice-dialog-title', title);
+      const msg = node('div', 'notice-dialog-msg');
+      const actions = node('div', 'notice-dialog-actions');
+      const ok = button('确定', 'notice-dialog-btn', () => close());
+      actions.append(ok);
+      dialog.append(head, msg, actions);
+      dialog.addEventListener('click', event => { if (event.target === dialog) close(); });
+      dialog.addEventListener('cancel', () => close());
+      app.append(dialog);
+    }
+    const msg = dialog.querySelector('.notice-dialog-msg');
+    if (msg) msg.textContent = message;
+    const titleEl = dialog.querySelector('.notice-dialog-title');
+    if (titleEl) titleEl.textContent = title;
+    dialog.setAttribute('aria-label', title);
+    const returnFocus = shadow.activeElement || document.activeElement;
+    function close() {
+      if (dialog.open) {
+        if (typeof dialog.close === 'function') dialog.close();
+        else dialog.removeAttribute('open');
+      }
+      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+      else grid.focus?.({ preventScroll: true });
+    }
+    if (typeof dialog.showModal === 'function') {
+      try { dialog.showModal(); } catch { dialog.setAttribute('open', ''); }
+    } else if (typeof dialog.show === 'function') {
+      dialog.show();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+    dialog.querySelector('.notice-dialog-btn')?.focus({ preventScroll: true });
+    return { dialog, close };
+  }
+  function removeDeletedCard(tid) {
+    const entry = listCards.get(tid);
+    const card = entry?.card || grid.querySelector(`[data-tid="${tid}"]`);
+    if (card) {
+      cardObserver?.unobserve(card);
+      card.remove();
+      listCards.delete(tid);
+    }
+    items = items.filter(item => item.tid !== tid);
+    for (const page of listPages.values()) {
+      if (Array.isArray(page?.items)) {
+        page.items = page.items.filter(item => item.tid !== tid);
+      }
+    }
+    if (favorites[tid]) {
+      delete favorites[tid];
+      favoriteChanges.add(tid);
+      postCache?.setFavorite({ tid }, false);
+    }
+    cacheListPages();
+    postCache?.remove([tid]);
+    layoutMasonry();
+    const source = tab === 'saved' ? Object.values(favorites) : items;
+    const visibleCount = source.filter(item => (tab !== 'hot' || item.replies >= 100) && (!query || `${item.title} ${item.author}`.toLowerCase().includes(query))).length;
+    subtitle.textContent = `第 ${firstListPage}${listPages.size > 1 ? `–${listCursor}` : ''} 页 · ${visibleCount} 篇${query ? ' · 已加载搜索' : ''}`;
+    empty.hidden = visibleCount > 0;
+    updateListControls();
+  }
+  const handlePostDeleted = event => {
+    const { tid } = event.detail || {};
+    if (!tid) return;
+    const entry = listCards.get(tid);
+    const title = entry?.card?.item?.title || entry?.card?.querySelector?.('.title')?.textContent || '';
+    removeDeletedCard(tid);
+    showNotice(title ? `“${title}” 帖子已被删除，已从瀑布流中移除。` : '该帖子已被删除，已从瀑布流中移除。');
+  };
+  document.addEventListener('readscape-post-deleted', handlePostDeleted);
+  window.addEventListener('pagehide', () => document.removeEventListener('readscape-post-deleted', handlePostDeleted));
+  window.addEventListener('popstate', () => { applyListCovers(); listActivityAt = Date.now() + 600; scheduleListUpdate(); });
   app.addEventListener('pointerdown', event => { listInteraction = true; listPointers.add(event.pointerId); markListActivity(); }, { passive: true, capture: true });
   const releasePointer = event => { listPointers.delete(event.pointerId); markListActivity(); };
   window.addEventListener('pointerup', releasePointer, { passive: true }); window.addEventListener('pointercancel', releasePointer, { passive: true });
@@ -48,7 +154,7 @@
   function resetPull() { pullStart = null; pullDistance = 0; pullIndicator.classList.remove('is-visible', 'is-ready'); }
   app.addEventListener('touchstart', event => {
     resetPull();
-    if (!streamKey || app.classList.contains('reader') || (event.touches?.length || 0) !== 1 || getReadingScroll() > 2 || app.hidden || readerCoversList() || app.classList.contains('rt-settings-open') || event.composedPath().some(el => el?.matches?.('input,button'))) return;
+    if (!streamKey || app.classList.contains('reader') || document.documentElement.hasAttribute('data-readscape-modal-open') || (event.touches?.length || 0) !== 1 || getReadingScroll() > 2 || app.hidden || readerCoversList() || app.classList.contains('rt-settings-open') || app.classList.contains('boards-open') || event.composedPath().some(el => el?.closest?.('.board-dialog, .notice-dialog, .rt-mask, .subforum-strip, .tabs') || el?.matches?.('input,button,a'))) return;
     const point = event.touches[0]; pullStart = { x: point.clientX, y: point.clientY }; pullCancelled = false;
   }, { passive: true });
   app.addEventListener('touchmove', event => {
@@ -126,6 +232,7 @@
     return restored;
   }
   async function startList() {
+    if (typeof isForumRoot !== 'undefined' && isForumRoot) { listBootPending = false; scan(); return; }
     if (!listBootPending) { scan(); return; }
     const generation = postCache.generation;
     app.classList.add('list-preparing'); updateListHeading(); toggle(true); renderPager();
@@ -177,21 +284,13 @@
       listPages.set(firstListPage, page); pendingListPage = null;
       listNext = listPages.get(listCursor).next; mergeListPages(); cacheListPages(); render();
     }
-    for (const [tid, cached] of pendingListCovers) {
-      const card = listCards.get(tid)?.card;
-      if (card?.isConnected) setCardCover(card, cached);
+    applyListCovers();
+    pendingAutomatic = false;
+    if (!pendingListPage) {
+      refreshBar.classList.remove('has-update');
+      refreshButton.hidden = true;
+      refreshStatus.textContent = '列表已更新';
     }
-    pendingListCovers.clear(); layoutMasonry();
-    if (position <= 2) setReadingScroll(0);
-    else if (anchor?.isConnected) setReadingScroll(position + anchor.getBoundingClientRect().top - anchorTop);
-    for (const card of grid.children) {
-      const old = before.get(card.dataset.tid);
-      if (old && old.html !== card.innerHTML) {
-        card.classList.remove('card-updated'); void card.offsetWidth; card.classList.add('card-updated');
-        card.addEventListener('animationend', () => card.classList.remove('card-updated'), { once: true });
-      }
-    }
-    pendingAutomatic = false; refreshBar.classList.remove('has-update'); refreshButton.hidden = true; refreshStatus.textContent = '列表已更新';
   }
   async function fetchListPage(url, number, signal) {
     const response = await fetch(url, { credentials: 'same-origin', cache: 'no-cache', signal });

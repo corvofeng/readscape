@@ -150,6 +150,7 @@
 
     function updateNative() {
       autoContinue();
+      if (typeof isDeletedDoc === 'function' && isDeletedDoc(document)) { navigation.finish(); return; }
       const posts = parsePosts(document, location.href);
       if (!posts.length) return;
       const sig = posts.map(p => `${p.key}|${p.author}|${JSON.stringify(p.profile)}|${p.replyURL}|${p.quoteURL}|${p.time}|${p.content.outerHTML}`).join('\n') +
