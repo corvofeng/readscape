@@ -22,12 +22,15 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const surfaceStyle = document.createElement('style');
   surfaceStyle.textContent = `
     html[data-readscape-active]{overflow:hidden!important;overscroll-behavior:none!important;height:100%!important;margin:0!important;padding:0!important;transform:none!important;filter:none!important;perspective:none!important;contain:none!important;content-visibility:visible!important;background:#fafafa!important}
+    html[data-readscape-active][data-rt-theme=paper]{background:#f6f2e9!important}
+    html[data-readscape-active][data-rt-theme=dark]{background:#17191d!important;color-scheme:dark}
     html[data-readscape-active]>body{display:none!important}
     html[data-readscape-active]::before,html[data-readscape-active]::after{display:none!important}
     html[data-readscape-active]>#nga-cards-host{all:initial!important;display:block!important;position:fixed!important;inset:0!important;width:100%!important;height:100%!important;height:100dvh!important;z-index:2147483000!important;isolation:isolate!important}
     html[data-readscape-document-scroll]{overflow-x:clip!important;overflow-y:auto!important;height:auto!important;min-height:100%!important;overscroll-behavior-y:auto!important}
     html[data-readscape-document-scroll]>#nga-cards-host{position:relative!important;inset:auto!important;height:auto!important;min-height:100svh!important;contain:none!important}
-    html[data-readscape-reader-open]{overflow:hidden!important;overscroll-behavior:none!important}
+    html[data-readscape-reader-open],html[data-readscape-modal-open]{overflow:hidden!important;overscroll-behavior:none!important}
+    html[data-readscape-modal-open]>body{overflow:hidden!important;touch-action:none!important}
   `;
   document.head.append(surfaceStyle);
   const originalViewport = document.querySelector('meta[name="viewport"]');
@@ -35,6 +38,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const viewport = originalViewport || document.createElement('meta');
   viewport.name = 'viewport';
   let items = [], tab = 'all', query = '', signature = '', timer;
+  const isForumRoot = /^\/(?:index\.php|forum\.php)?$/.test(pageURL.pathname) && !pageURL.searchParams.has('fid') && !pageURL.searchParams.has('stid') && !pageURL.searchParams.has('tid');
   let cardObserver, listObserver;
   const listCards = new Map();
   let coverDisposed = false;
@@ -71,7 +75,10 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     if (open) input.focus();
   }); mobileSearch.setAttribute('aria-label', '展开或收起搜索'); mobileSearch.setAttribute('aria-expanded', 'false');
   const mobileOptions = button('', 'mobile-tool toolbar-menu', () => {
-    refreshAccount(); mobileOptions.setAttribute('aria-expanded', String(app.classList.toggle('options-open')));
+    refreshAccount();
+    const open = app.classList.toggle('options-open');
+    mobileOptions.setAttribute('aria-expanded', String(open));
+    readingSettings?.open(mobileOptions);
   }); mobileOptions.setAttribute('aria-label', '展开或收起设置'); mobileOptions.setAttribute('aria-expanded', 'false');
   for (const [control, path] of [[mobileSearch, 'M21 21l-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0'], [mobileOptions, 'M5 6h14M5 12h14M5 18h14']]) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -79,11 +86,40 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     shape.setAttribute('d', path); shape.setAttribute('fill', 'none'); shape.setAttribute('stroke', 'currentColor'); shape.setAttribute('stroke-width', '1.7'); shape.setAttribute('stroke-linecap', 'round');
     svg.append(shape); control.append(svg);
   }
-  bar.append(brand, search, node('div', 'spacer'), mobileSearch, mobileOptions, button('切回原版', 'pill', () => toggle(false)));
+  const boardBarBtn = link('/index.php', '板块', 'board-bar-btn');
+  boardBarBtn.setAttribute('aria-label', '前往论坛首页选择板块');
+  boardBarBtn.addEventListener('click', e => {
+    if (e.isTrusted === false && typeof boardsManager?.open === 'function') {
+      e.preventDefault();
+      boardsManager.open();
+    }
+  });
+  bar.append(brand, search, node('div', 'spacer'), boardBarBtn, mobileSearch, mobileOptions, button('切回原版', 'pill', () => toggle(false)));
   top.append(bar);
-  const main = node('main'), intro = node('div', 'intro'), heading = node('div');
-  const h1 = node('h1', '', '论坛发现'), subtitle = node('div', 'sub');
+  const main = node('main'), intro = node('div', 'intro'), heading = node('div', 'intro-heading');
+  const h1 = node('h1', 'board-title', '');
+  const h1Text = node('span', 'board-title-text', '论坛发现');
+  const switchBadge = link('/index.php', '切换 ↗', 'board-title-switch');
+  switchBadge.setAttribute('aria-label', '前往论坛首页切换板块');
+  switchBadge.addEventListener('click', e => {
+    if (e.isTrusted === false && typeof boardsManager?.open === 'function') {
+      e.preventDefault();
+      boardsManager.open();
+    }
+  });
+  h1.append(h1Text, switchBadge);
+  h1.addEventListener('click', event => {
+    if (event.target !== switchBadge) {
+      if (isForumRoot) return;
+      if (event.isTrusted === false && typeof boardsManager?.open === 'function') boardsManager.open();
+      else location.href = '/index.php';
+    }
+  });
+  const subtitle = node('div', 'sub');
   heading.append(h1, subtitle);
+  const subforumStrip = node('nav', 'subforum-strip');
+  subforumStrip.setAttribute('aria-label', '当前板块子版块导航');
+  subforumStrip.hidden = true;
   const settings = node('div', 'settings');
   for (const [prop, label] of [['single', '手机单列']]) {
     const wrap = node('label'), check = node('input'); check.type = 'checkbox'; check.checked = !!prefs[prop];
@@ -92,6 +128,8 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   }
   /* ACCOUNT_MODULE */
   /* PROFILE_MODULE */
+  /* BOARDS_MODULE */
+  const boardsManager = mountBoardsManager({ context: window, shadow, app, pageURL, prefs, savePrefs });
   const userProfiles = mountUserProfiles();
   const currentAccount = () => readCurrentAccount(window);
   const openLogin = trigger => {
@@ -107,7 +145,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const accountStatus = button('未登录', 'session-status', () => openLogin(accountStatus));
   accountStatus.setAttribute('aria-label', '未登录，登录 NGA');
   bar.insertBefore(accountStatus, mobileOptions);
-  settings.append(accountButton, button('阅读设置', 'settings-reading', () => readingSettings.open()), button('原版页面 ↗', 'settings-native', () => toggle(false)));
+  settings.append(accountButton, button('切换板块', 'settings-boards', () => boardsManager.open()), button('阅读设置', 'settings-reading', () => readingSettings.open()), button('原版页面 ↗', 'settings-native', () => toggle(false)));
   intro.append(heading, settings);
   const tabs = node('nav', 'tabs'); tabs.setAttribute('aria-label', '帖子筛选'); tabs.setAttribute('role', 'tablist');
   for (const [id, label] of [['all', '全部'], ['hot', '热议'], ['saved', '收藏']]) {
@@ -124,11 +162,11 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     event.preventDefault(); cover.focus({ preventScroll: true });
   });
   const empty = node('div', 'empty'), pager = node('nav', 'pager'); pager.setAttribute('aria-label', '论坛分页');
-  main.append(intro, tabs, grid, empty, pager, node('div', 'foot', '按原站顺序追加 · 热议为已加载帖子回复 ≥ 100 · 收藏仅存本浏览器'));
+  main.append(intro, subforumStrip, tabs, grid, empty, pager, node('div', 'foot', '按原站顺序追加 · 热议为已加载帖子回复 ≥ 100 · 收藏仅存本浏览器'));
   app.append(top, main);
   const restore = button('卡片模式', 'restore', () => toggle(true)); restore.hidden = true;
   shadow.append(app, restore); document.documentElement.append(host);
-  readingSettings = mountSettings({ context: window, shadow, app, prefs, cache: postCache, save: savePrefs, change: () => { if (prefs.smoothNavigation === false) navigation.finish(); settingsRefresh(); if (!app.classList.contains('reader')) configureListRefresh(); settings.querySelectorAll('input').forEach(c => { c.checked = !!prefs['single']; }); }, original: () => modeToggle(false), login: openLogin });
+  readingSettings = mountSettings({ context: window, shadow, app, prefs, cache: postCache, save: savePrefs, change: () => { if (prefs.smoothNavigation === false) navigation.finish(); settingsRefresh(); if (!app.classList.contains('reader')) configureListRefresh(); settings.querySelectorAll('input').forEach(c => { c.checked = !!prefs['single']; }); }, original: () => modeToggle(false), login: openLogin, openBoards: () => boardsManager?.open() });
   let accountSignature;
   function refreshAccount() {
     const account = currentAccount(), signature = JSON.stringify(account);
@@ -192,8 +230,8 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   function toggle(enabled) {
     const readingPosition = getReadingScroll();
     prefs.enabled = enabled; savePrefs();
-    app.hidden = !enabled || (!items.length && !listBootPending);
-    restore.hidden = enabled || !items.length;
+    app.hidden = !enabled || (!items.length && !listBootPending && !isForumRoot);
+    restore.hidden = enabled || (!items.length && !isForumRoot);
     setViewport(!app.hidden);
     setSurface(!app.hidden, readingPosition);
     readingSettings?.visibility(!app.hidden);
@@ -230,7 +268,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   mobileViewport?.addEventListener('change', updateScrollMode);
   let chromeScroll = 0;
   const updateReadingChrome = () => {
-    if (!usesDocumentScroll() || document.documentElement.hasAttribute('data-readscape-reader-open')) return;
+    if (!usesDocumentScroll() || document.documentElement.hasAttribute('data-readscape-reader-open') || document.documentElement.hasAttribute('data-readscape-modal-open')) return;
     const top = window.scrollY, delta = top - chromeScroll;
     if (top < 90 || Math.abs(delta) >= 12) {
       app.classList.toggle('rt-chrome-hidden', top >= 90 && delta > 0 && !app.classList.contains('options-open'));
@@ -362,6 +400,19 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   function scan() {
     autoContinue();
     if (listBootPending) return;
+    if (isForumRoot) {
+      h1Text.textContent = '选择论坛板块';
+      subtitle.textContent = 'NGA 拥有众多精彩子论坛，请选择您想浏览的板块';
+      switchBadge.hidden = true;
+      subforumStrip.hidden = true;
+      tabs.hidden = true;
+      grid.hidden = true;
+      pager.hidden = true;
+      if (typeof refreshBar !== 'undefined') refreshBar.hidden = true;
+      boardsManager.renderPortalView(main, empty);
+      toggle(prefs.enabled !== false);
+      return;
+    }
     const found = extract();
     const sig = JSON.stringify([found, nextListURL(document, firstListPage, pageURL.href)]);
     if (sig === signature) return;
@@ -381,11 +432,16 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   }
 
   function updateListHeading() {
-    const board = [...document.querySelectorAll('a[href*="thread.php"]')].find(a => {
-      const u = safeURL(a.getAttribute('href'));
-      return u && u.searchParams.get('stid') === pageURL.searchParams.get('stid') && a.textContent.trim().length > 3;
-    });
-    h1.textContent = board?.textContent.trim() || document.title.replace(/\s*[-_].*NGA.*$/i, '') || '论坛发现';
+    if (isForumRoot) {
+      switchBadge.hidden = true;
+      subforumStrip.hidden = true;
+      return;
+    }
+    const info = boardsManager.detectBoardInfo(document, window, pageURL);
+    h1Text.textContent = info.name;
+    switchBadge.hidden = false;
+    boardsManager.recordRecentBoard({ fid: info.fid, stid: info.stid, name: info.name, url: location.href });
+    boardsManager.renderSubforumStrip(subforumStrip);
   }
 
   function renderPager() {
@@ -435,6 +491,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   window.addEventListener('pagehide', saveListScroll);
 
   function render(cacheVisit = true) {
+    if (isForumRoot) return;
     grid.classList.toggle('single', !!prefs.single);
     for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
     // 收藏包含曾浏览过的其他页；全部与热议保持已加载页面的原始顺序。

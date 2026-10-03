@@ -5,6 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const script=fs.readFileSync(path.join(__dirname,'../dist/readscape-nga.user.js'),'utf8');
 const core=fs.readFileSync(path.join(__dirname,'../src/core/navigation.js'),'utf8');
+const settings=fs.readFileSync(path.join(__dirname,'../src/core/settings.js'),'utf8');
 const fixture=`<head><title>测试 NGA玩家社区</title></head><body><table id="topicrows"><tr class="topicrow"><td class="c1"><a class="replies" href="/read.php?tid=123">18</a></td><td class="c4"><a class="replydate" href="/read.php?tid=123&page=e">今天 13:59</a></td><td class="c2"><a class="topic" href="/read.php?tid=123">真正的帖子标题</a></td><td class="c3"><a class="author">作者</a></td></tr></table></body>`;
 function dom(html=fixture){return new JSDOM(html,{url:'https://bbs.nga.cn/thread.php?stid=10',runScripts:'dangerously',virtualConsole:new VirtualConsole()});}
 test('reading hides native layout including late content and restores native styles and scroll',async()=>{
@@ -52,6 +53,12 @@ test('settings persist, layout changes, reset and keyboard dismissal work',async
   function set(key,value){const c=r.querySelector(`[data-pref=${key}]`);if(c.type==='checkbox')c.checked=value;else c.value=value;c.dispatchEvent(new w.Event(c.type==='range'?'input':'change'));}
   set('theme','dark');set('font','serif');set('fontScale','1.2');set('single',true);
   assert(r.querySelector('.app').classList.contains('rt-dark'));
+  assert.equal(w.document.documentElement.dataset.rtTheme, 'dark');
+  assert.equal(w.document.querySelector('meta[name="theme-color"]')?.content, '#17191d');
+  set('theme','paper');
+  assert.equal(w.document.documentElement.dataset.rtTheme, 'paper');
+  assert.equal(w.document.querySelector('meta[name="theme-color"]')?.content, '#faf7ef');
+  set('theme','dark');
   assert.match(r.querySelector('.app').style.getPropertyValue('--rt-font'),/Songti/);
   assert.equal(r.querySelector('.app').style.getPropertyValue('--rt-scale'),'1.2');
   assert(r.querySelector('.grid').classList.contains('single'));
@@ -60,10 +67,15 @@ test('settings persist, layout changes, reset and keyboard dismissal work',async
   assert(next.window.document.querySelector('#nga-cards-host').shadowRoot.querySelector('.app').classList.contains('rt-dark'));next.window.close();
   r.querySelector('.rt-mask').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert(r.querySelector('.rt-mask').hidden);
   r.querySelector('.rt-fab').click();r.querySelector('.rt-actions button').click();assert(!r.querySelector('.app').classList.contains('rt-dark'));assert(!r.querySelector('.grid').classList.contains('single'));
+  assert.equal(w.document.documentElement.dataset.rtTheme, 'light');
+  assert.equal(w.document.querySelector('meta[name="theme-color"]')?.content, '#ffffff');
   // NGA 后续脚本重写 viewport 后恢复移动端视口。
   const v=w.document.querySelector('meta[name=viewport]');v.content='width=1024';await new Promise(resolve=>w.setTimeout(resolve,20));
   assert.equal(v.content,'width=device-width, initial-scale=1, viewport-fit=cover');
-  r.querySelectorAll('.rt-actions button')[1].click();assert(r.querySelector('.app').hidden);assert(r.querySelector('.rt-fab').hidden);d.window.close();
+  r.querySelectorAll('.rt-actions button')[1].click();assert(r.querySelector('.app').hidden);assert(r.querySelector('.rt-fab').hidden);
+  assert.equal(w.document.documentElement.dataset.rtTheme, undefined);
+  assert.equal(w.document.querySelector('meta[name="theme-color"]'), null);
+  d.window.close();
 });
 test('compact settings allow live page preview, expose switches and close by cancel/backdrop/swipe',()=>{
   const d=dom(),w=d.window;w.eval(script);const r=w.document.querySelector('#nga-cards-host').shadowRoot;
@@ -176,3 +188,81 @@ test('top menu opens native login and settings without scrolling to the pager',(
   assert.equal(logins,1);assert(r.querySelector('.app').hidden);assert(r.querySelector('.rt-mask').hidden);
   assert.doesNotMatch(r.querySelector('.pager').textContent,/登录/);w.close();
 });
+
+test('clicking deleted post dismisses background, alerts user, removes card and re-layouts waterfall', async () => {
+  const d = dom(), w = d.window;
+  w.eval(script);
+  const root = w.document.querySelector('#nga-cards-host').shadowRoot;
+  let poll;
+  w.setInterval = fn => { poll = fn; return 1; };
+  w.clearInterval = () => {};
+  const card = root.querySelector('.card[data-tid="123"]');
+  assert(card, 'card 123 initially exists in grid');
+  assert.equal(root.querySelectorAll('.card').length, 1);
+
+  // Click card to open
+  root.querySelector('.cover').dispatchEvent(new w.MouseEvent('click', { bubbles: true, composed: true, cancelable: true }));
+  const frame = w.document.querySelector('iframe[data-readscape-reader]');
+  assert(frame, 'iframe created');
+
+  // Child frame receives NGA error 62 "帖子被删除" page
+  const child = frame.contentWindow;
+  child.document.open();
+  child.document.write('<head><title>帖子被删除</title></head><body>(ERROR:<!--msgcodestart-->62<!--msgcodeend-->) <span class="sub">&gt;</span> <!--msginfostart-->帖子被删除<!--msginfoend--></body>');
+  child.document.close();
+  child.document.title = '帖子被删除';
+
+  await new Promise(resolve => setTimeout(resolve, 0));
+  poll();
+
+  // Background frame and notice are removed
+  assert.equal(w.document.querySelector('iframe[data-readscape-reader]'), null);
+  assert.equal(w.document.querySelector('[role=status]'), null);
+  assert.match(w.location.href, /thread\.php/);
+
+  // Notice dialog pops up
+  const dialog = root.querySelector('.notice-dialog');
+  assert(dialog, 'notice dialog created');
+  assert(dialog.hasAttribute('open'));
+  assert.match(dialog.textContent, /帖子已被删除/);
+
+  // Card is removed from the waterfall
+  assert.equal(root.querySelector('.card[data-tid="123"]'), null);
+  assert.equal(root.querySelectorAll('.card').length, 0);
+
+  // Close dialog
+  dialog.querySelector('.notice-dialog-btn').click();
+  assert(!dialog.hasAttribute('open'));
+
+  d.window.close();
+});
+
+test('iframe reader syncs theme-color and data-rt-theme to parent window', () => {
+  const d = dom(), w = d.window;
+  const shadow = w.document.createElement('div').attachShadow({ mode: 'open' });
+  const app = w.document.createElement('div');
+  const childDoc = d.window.document.implementation.createHTMLDocument();
+  const child = {
+    document: childDoc,
+    parent: w,
+    addEventListener() {},
+    removeEventListener() {}
+  };
+  w.eval(settings + ';window.mountSettings = mountSettings;');
+  const prefs = { theme: 'paper' };
+  w.mountSettings({
+    context: child,
+    shadow,
+    app,
+    prefs,
+    save() {},
+    change() {},
+    original() {}
+  });
+  assert.equal(w.document.documentElement.dataset.rtTheme, 'paper');
+  assert.equal(w.document.querySelector('meta[name="theme-color"]')?.content, '#faf7ef');
+  assert.equal(childDoc.documentElement.dataset.rtTheme, 'paper');
+  assert.equal(childDoc.querySelector('meta[name="theme-color"]')?.content, '#faf7ef');
+  d.window.close();
+});
+

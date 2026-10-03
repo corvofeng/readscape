@@ -4,6 +4,16 @@ function createNavigation(config, context = globalThis.window) {
   const key = 'reader-toolkit-transition';
   let veil, timeout, background, scrollRestoration;
   const framed = window.top !== window.self;
+  function safeTid(raw) { try { return new URL(raw, location.href).searchParams.get('tid'); } catch { return null; } }
+  function isDeletedDoc(doc) {
+    if (!doc) return false;
+    if (doc.querySelector?.('.postcontent, [id^="postcontent"], #postcontainer0')) return false;
+    const title = (doc.title || '').trim();
+    const text = doc.body?.textContent || '';
+    return /ERROR:\s*62/i.test(text) || /ERROR:\s*62/i.test(title) ||
+      title === '帖子被删除' || title === '主题被删除' ||
+      /(?:ERROR:\s*62\s*\)?\s*>\s*)?帖子(?:不存在或)?(?:已[被经]|被)?删除/.test(text);
+  }
   // 只允许本脚本创建的同源阅读容器运行适配器。
   function disposeBackground() {
     if (!background) return;
@@ -31,7 +41,7 @@ function createNavigation(config, context = globalThis.window) {
     disposeBackground(); finish();
     const frame = document.createElement('iframe');
     frame.dataset.readscapeReader = 'true'; frame.dataset.readscapeListURL = (restoring && history.state?.readscapeListURL) || location.href; frame.title = '帖子与评论';
-    frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;height:100dvh;border:0;z-index:2147483002;visibility:hidden;pointer-events:none;background:#fafafa;overscroll-behavior:none';
+    frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;height:100dvh;border:0;z-index:2147483002;visibility:hidden;pointer-events:none;background:transparent;overscroll-behavior:none';
     const notice = document.createElement('div');
     notice.setAttribute('role', 'status');
     notice.style.cssText = 'position:fixed;bottom:20px;left:16px;right:16px;width:fit-content;max-width:calc(100% - 32px);z-index:2147483003;padding:12px 16px;border-radius:14px;background:#fff;color:#555;box-shadow:0 4px 24px #0002;font:14px system-ui;display:flex;gap:12px;align-items:center;flex-wrap:wrap';
@@ -56,11 +66,22 @@ function createNavigation(config, context = globalThis.window) {
       if (background !== state) return;
       try {
         const doc = frame.contentDocument;
-        if (doc?.body && doc.readyState !== 'loading' && doc.URL !== 'about:blank' && state.mountedDoc !== doc) {
-          const childURL = new URL(doc.URL);
-          if (childURL.origin !== location.origin || !config.accepts(childURL)) { fail(); return; }
-          state.cleanup?.(); state.mountedDoc = doc;
-          state.cleanup = config.mountReader?.(frame.contentWindow);
+        if (doc?.body && doc.readyState !== 'loading' && doc.URL !== 'about:blank') {
+          const checkDeleted = config.isDeleted || isDeletedDoc;
+          if (checkDeleted(doc, u)) {
+            const tid = u.searchParams.get('tid') || safeTid(doc.URL);
+            disposeBackground();
+            document.dispatchEvent(new (document.defaultView?.CustomEvent || CustomEvent)('readscape-post-deleted', {
+              detail: { tid, url: u.href, reason: '帖子被删除' }
+            }));
+            return;
+          }
+          if (state.mountedDoc !== doc) {
+            const childURL = new URL(doc.URL);
+            if (childURL.origin !== location.origin || !config.accepts(childURL)) { fail(); return; }
+            state.cleanup?.(); state.mountedDoc = doc;
+            state.cleanup = config.mountReader?.(frame.contentWindow);
+          }
         }
         const reader = doc?.getElementById('nga-cards-host')?.shadowRoot?.querySelector('.reader');
         if (!reader || reader.hidden || !reader.querySelector('.comment')) return;
