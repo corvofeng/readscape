@@ -358,12 +358,20 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
 
   /* LIST_MODULE */
 
+  function getGridColumns() {
+    const raw = window.getComputedStyle(grid).gridTemplateColumns.trim();
+    const repeatMatch = raw.match(/repeat\(\s*(\d+)\s*,/i);
+    if (repeatMatch) return Math.max(1, parseInt(repeatMatch[1], 10));
+    const tracks = raw.split(/\s+/).filter(t => t && !t.startsWith('repeat') && !t.startsWith('minmax'));
+    return Math.max(1, tracks.length);
+  }
+
   // 每张卡片固定所在列，列内按实测高度累加。自动网格排位会因某张卡片增高
   // 把后续卡片换到另一列；显式行列位置让封面、字体加载与追加只影响所在列。
   function layoutMasonry() {
     if (!grid.isConnected || !grid.classList.contains('masonry')) return;
-    const tracks = window.getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/);
-    const columns = Math.max(1, tracks.length);
+    if (app.hidden || app.style.display === 'none') return;
+    const columns = getGridColumns();
     const rows = Array(columns).fill(1);
     const cards = [...grid.children];
     cards.forEach((card, index) => { card.style.gridColumn = String(index % columns + 1); });
@@ -427,40 +435,9 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   });
   window.addEventListener('pagehide', event => { if (event.persisted) return; coverDisposed = true; unsubscribeCache?.(); });
 
-  function extract(doc = document, base = pageURL.href) {
-    const result = [], seen = new Set();
-    // 优先常见 NGA topic 类，同时兼容 table / li 列表；不依赖数字化动态 ID。
-    for (const a of [...doc.querySelectorAll('a.topic, a[id^="t_tt"], .c2 > a[href*="read.php"]'), ...doc.querySelectorAll('a[href*="read.php"]')]) {
-      if (a.matches('.replydate,.replies,.reply') || a.closest('.c1,.c4,[id^="t_pc"]')) continue;
-      const u = safeURL(a.getAttribute('href'), base);
-      if (!u || u.origin !== location.origin || !/\/read\.php$/.test(u.pathname)) continue;
-      const tid = u.searchParams.get('tid');
-      if (!tid || !/^\d+$/.test(tid) || seen.has(tid)) continue;
-      if (+u.searchParams.get('page') > 1 && !a.classList.contains('topic')) continue;
-      const title = a.textContent.trim();
-      if (title.length < 3 || /^[\d\s.>…]+$/.test(title) || /^(?:(?:今天|昨天|前天)\s*\d{1,2}:\d{2}|\d+\s*(?:分钟前|小时前)|\d{2}-\d{2}\s+\d{1,2}:\d{2})$/.test(title)) continue;
-      const row = a.closest('tr, .topicrow, .topic-row, li');
-      if (!row) continue;
-      seen.add(tid);
-      const users = [...row.querySelectorAll('a[href*="uid="], a.author')];
-      const replyEl = row.querySelector('.replies, .reply, .c1');
-      const firstCell = row.querySelector('td');
-      const numeric = [replyEl?.textContent, firstCell?.textContent].map(x => (x || '').trim()).find(x => /^\d[\d,]*$/.test(x)) || '';
-      const replies = /^\d[\d,]*$/.test(numeric) ? Number(numeric.replaceAll(',', '')) : null;
-      const cells = [...row.querySelectorAll('td')];
-      const last = cells.at(-1);
-      const author = users[0]?.textContent.trim() || row.querySelector('.author')?.textContent.trim() || '';
-      const timeMatch = (last?.textContent || '').match(/(?:\d+\s*分钟前|\d+\s*小时前|(?:今天|昨天|前天)\s*\d{1,2}:\d{2}|\d{2}-\d{2}\s+\d{1,2}:\d{2})/);
-      const pageLinks = [...row.querySelectorAll('a[href*="read.php"]')].map(x => safeURL(x.getAttribute('href'), base)).filter(x => x?.origin === u.origin && x.searchParams.get('tid') === tid);
-      const replyURL = safeURL(row.querySelector('a.replydate')?.getAttribute('href') || '', base);
-      const lastURL = replyURL?.origin === u.origin && replyURL.searchParams.get('tid') === tid ? replyURL : pageLinks.sort((x, y) => Number(y.searchParams.get('page') || 1) - Number(x.searchParams.get('page') || 1))[0];
-      u.searchParams.delete('page'); u.hash = '';
-      const authorURL = safeURL(users[0]?.getAttribute('href') || '', base);
-      const uid = authorURL?.searchParams.get('uid') || null;
-      result.push({ tid, title, author, uid, replies, time: timeMatch?.[0] || '', url: u.href, latest: lastURL?.href || '', pinned: /置顶/.test(title) || /(?:^|\s)(?:top|sticky)(?:\s|$)/i.test(row.className) });
-    }
-    return result;
-  }
+  /* API_MODULE */
+  const ngaApi = createNGAApi({ pageURL, safeURL });
+  const extract = ngaApi.extractTopics;
 
   function scan() {
     autoContinue();
@@ -643,16 +620,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   if (/\/read\.php$/.test(pageURL.pathname)) { startReader(); return; }
 
   let savedListScroll = 0, savedListTitle = '', activeReaderInstance = null, currentReaderURL = null, activeReaderTitle = '', currentOpener = null;
-
-  function isDeletedDoc(doc) {
-    if (!doc) return false;
-    if (doc.querySelector?.('.postcontent, [id^="postcontent"], #postcontainer0')) return false;
-    const title = (doc.title || '').trim();
-    const text = doc.body?.textContent || '';
-    return /ERROR:\s*62/i.test(text) || /ERROR:\s*62/i.test(title) ||
-      title === '帖子被删除' || title === '主题被删除' ||
-      /(?:ERROR:\s*62\s*\)?\s*>\s*)?帖子(?:不存在或)?(?:已[被经]|被)?删除/.test(text);
-  }
+  let activeSPAController = null;
 
   function canUseSPA() {
     return typeof window.fetch === 'function' && prefs.enabled !== false && prefs.smoothNavigation !== false && prefs.spaReader !== false;
@@ -664,7 +632,13 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     const tid = url.searchParams.get('tid');
     if (!tid) return false;
 
+    if (activeSPAController) {
+      activeSPAController.abort();
+      activeSPAController = null;
+    }
+
     if (restoring && activeReaderInstance && currentReaderURL?.href === url.href && readerApp) {
+      shadow.querySelector('.spa-loading-notice')?.remove();
       app.style.display = 'none';
       app.inert = true;
       readerApp.style.display = '';
@@ -682,46 +656,34 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     }
 
     const controller = new AbortController();
+    activeSPAController = controller;
     const fetchTimeout = setTimeout(() => controller.abort(), 12000);
 
-    fetch(url.href, { credentials: 'same-origin', signal: controller.signal })
-      .then(async response => {
+    ngaApi.fetchThreadDoc(url.href, { signal: controller.signal })
+      .then(({ doc }) => {
         clearTimeout(fetchTimeout);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        let bytes;
-        if (typeof response.arrayBuffer === 'function') {
-          bytes = new Uint8Array(await response.arrayBuffer());
-        } else if (typeof response.text === 'function') {
-          bytes = new TextEncoder().encode(await response.text());
-        } else {
-          throw new Error('Unsupported response body');
-        }
-        const initial = new TextDecoder('utf-8').decode(bytes);
-        const encoding = response.headers?.get?.('content-type')?.match(/charset\s*=\s*([\w-]+)/i)?.[1] || initial.slice(0, 4096).match(/charset\s*=\s*["']?([\w-]+)/i)?.[1] || 'utf-8';
-        const doc = new DOMParser().parseFromString(new TextDecoder(encoding).decode(bytes), 'text/html');
+        if (activeSPAController === controller) activeSPAController = null;
+        notice?.remove();
 
-        if (isDeletedDoc(doc)) {
+        if (ngaApi.isDeletedDoc(doc)) {
           document.dispatchEvent(new (window.CustomEvent || CustomEvent)('readscape-post-deleted', {
             detail: { tid, url: url.href, reason: '帖子被删除' }
           }));
           return;
         }
 
-        if (doc.title === '访客不能直接访问') {
-          location.assign(url.href);
-          return;
-        }
-
-        if (!doc.querySelector?.('.postcontent, [id^="postcontent"], #postcontainer0')) {
+        if (ngaApi.isVisitorGate(doc) || !ngaApi.hasThreadContent(doc)) {
           location.assign(url.href);
           return;
         }
 
         activateSPAReader(url, doc, opener);
       })
-      .catch(() => {
+      .catch(err => {
         clearTimeout(fetchTimeout);
+        if (activeSPAController === controller) activeSPAController = null;
         notice?.remove();
+        if (err?.name === 'AbortError') return;
         location.assign(url.href);
       });
 
@@ -729,6 +691,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   }
 
   function activateSPAReader(url, doc, opener) {
+    shadow.querySelector('.spa-loading-notice')?.remove();
     if (!readerApp) {
       readerApp = node('div', 'app reader');
       readerApp.tabIndex = -1;
@@ -761,6 +724,11 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   }
 
   function returnFromSPAReader() {
+    if (activeSPAController) {
+      activeSPAController.abort();
+      activeSPAController = null;
+    }
+    shadow.querySelector('.spa-loading-notice')?.remove();
     if (!readerApp || readerApp.hidden) return;
     readerApp.style.display = 'none';
     readerApp.hidden = true;
@@ -771,19 +739,31 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
 
     app.style.display = '';
     app.inert = false;
+    app.classList.remove('rt-chrome-hidden');
+    chromeScroll = savedListScroll;
     document.title = savedListTitle || document.title;
+    layoutMasonry();
     setReadingScroll(savedListScroll);
     readingSettings?.setActions([]);
+    readingSettings?.visibility(!app.hidden);
 
-    if (currentOpener?.isConnected && typeof currentOpener.focus === 'function') {
-      currentOpener.focus({ preventScroll: true });
-    } else {
-      app.focus({ preventScroll: true });
-    }
+    const opener = currentOpener;
     currentOpener = null;
+    if (opener?.isConnected && typeof opener.focus === 'function') {
+      try { opener.focus({ preventScroll: true }); } catch {}
+      setReadingScroll(savedListScroll);
+    } else {
+      try { app.focus({ preventScroll: true }); } catch {}
+    }
+    document.dispatchEvent(new (window.CustomEvent || CustomEvent)('readscape-list-resume'));
   }
 
   function onPopStateSPA(event) {
+    if (activeSPAController) {
+      activeSPAController.abort();
+      activeSPAController = null;
+      shadow.querySelector('.spa-loading-notice')?.remove();
+    }
     if (readerApp && !readerApp.hidden) {
       if (!event.state?.readscapeSPA) {
         returnFromSPAReader();

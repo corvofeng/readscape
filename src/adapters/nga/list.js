@@ -7,7 +7,7 @@
   let listActivityAt = 0, listUpdateTimer, autoRefreshTimer, pendingAutomatic = false;
   let pullStart, pullDistance = 0, pullCancelled = false;
   const pullIndicator = node('div', 'list-pull', '下拉刷新'); pullIndicator.setAttribute('role', 'status'); app.prepend(pullIndicator);
-  function readerCoversList() { return !!document.querySelector('iframe[data-readscape-reader]'); }
+  function readerCoversList() { return !!document.querySelector('iframe[data-readscape-reader]') || !!(typeof readerApp !== 'undefined' && readerApp && !readerApp.hidden); }
   function markListActivity() { listActivityAt = Date.now(); scheduleListUpdate(); }
   function listCanUpdate() {
     return !coverDisposed && !app.hidden && !document.hidden && !readerCoversList() && !listPointers.size && !pullStart && !listBusy && !app.classList.contains('rt-settings-open') && Date.now() - listActivityAt >= 650;
@@ -317,15 +317,7 @@
     }
   }
   async function fetchListPage(url, number, signal) {
-    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-cache', signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    if (!validListURL(response.url || url, number)) throw new Error('原站返回了其他页面');
-    const bytes = new Uint8Array(await response.arrayBuffer()), initial = new TextDecoder('utf-8').decode(bytes);
-    const encoding = response.headers.get('content-type')?.match(/charset\s*=\s*([\w-]+)/i)?.[1] || initial.slice(0,4096).match(/charset\s*=\s*["']?([\w-]+)/i)?.[1] || 'utf-8';
-    const doc = new DOMParser().parseFromString(new TextDecoder(encoding).decode(bytes), 'text/html');
-    const found = extract(doc, url);
-    if (!found.length) throw new Error('需要原站跳转、登录，或页面结构不支持');
-    return { url, items: found.map(item => ({ ...item, lastAccess: Date.now() })), next: nextListURL(doc, number, url) };
+    return await ngaApi.fetchListPage(url, number, { signal, validListURL, nextListURL });
   }
   async function revalidateList({ force = false } = {}) {
     if (!streamKey || app.classList.contains('reader') || refreshController || coverDisposed) return;

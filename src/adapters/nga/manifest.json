@@ -19,6 +19,7 @@
     "/"
   ],
   "modules": {
+    "API_MODULE": "api.js",
     "LIST_MODULE": "list.js",
     "READER_MODULE": "reader.js",
     "ACCOUNT_MODULE": "account.js",

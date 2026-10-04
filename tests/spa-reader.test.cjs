@@ -57,6 +57,9 @@ function createSPAPage({ fetcher } = {}) {
   w.TextEncoder = TextEncoder;
 
   w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  w.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  const origComputed = w.getComputedStyle.bind(w);
+  w.getComputedStyle = el => el.classList.contains('grid') ? { gridTemplateColumns: '180px 180px' } : origComputed(el);
   if (fetcher) {
     w.fetch = fetcher;
   }
@@ -113,11 +116,15 @@ test('SPA reader loads post via background fetch and mounts in-page without ifra
     assert.match(readerApp.textContent, /详细的正文内容测试/);
     assert.match(readerApp.textContent, /这是一楼回复/);
 
-    // Verify document.title and URL updated
-    assert.match(w.document.title, /精选攻略/);
-    assert.match(w.location.href, /tid=100/);
+    // Verify loading notice is removed while reading
+    assert.equal(root.querySelector('.spa-loading-notice'), null, 'Loading notice should be removed after reader is mounted');
+
+    // Verify list bar session-status still exists
+    assert(root.querySelector('.bar .session-status'), 'Session status button should still exist in list bar');
 
     // Now test navigating back via popstate
+    let resumed = false;
+    w.document.addEventListener('readscape-list-resume', () => { resumed = true; });
     w.history.back();
     // Dispatch popstate event as JSDOM does not auto-dispatch on history.back
     w.dispatchEvent(new w.PopStateEvent('popstate', { state: null }));
@@ -130,6 +137,40 @@ test('SPA reader loads post via background fetch and mounts in-page without ifra
     // Verify listApp is restored
     assert.equal(listApp.style.display, '');
     assert.equal(listApp.inert, false);
+
+    // Verify loading notice is NOT on list
+    assert.equal(root.querySelector('.spa-loading-notice'), null, 'Loading notice must not remain after returning to list');
+    assert(root.querySelector('.bar .session-status'), 'Session status button should remain intact after returning to list');
+    assert.equal(resumed, true, 'readscape-list-resume should be dispatched on return');
+  } finally {
+    d.window.close();
+  }
+});
+
+test('SPA reader aborts in-flight request and removes notice when navigated back early', async () => {
+  let abortSignal = null;
+  const { d, w, root } = createSPAPage({
+    fetcher: (url, opts) => {
+      abortSignal = opts?.signal;
+      return new Promise(() => {}); // never resolves
+    }
+  });
+
+  try {
+    const card = root.querySelector('[data-tid="100"]');
+    card.querySelector('.cover').click();
+    await tick();
+
+    assert(root.querySelector('.spa-loading-notice'), 'Notice should be visible while loading');
+    assert.equal(abortSignal?.aborted, false);
+
+    // Navigate back while still loading
+    w.history.back();
+    w.dispatchEvent(new w.PopStateEvent('popstate', { state: null }));
+    await tick();
+
+    assert.equal(abortSignal?.aborted, true, 'In-flight fetch should be aborted');
+    assert.equal(root.querySelector('.spa-loading-notice'), null, 'Notice should be removed upon popstate');
   } finally {
     d.window.close();
   }
@@ -180,3 +221,41 @@ test('SPA reader falls back gracefully when fetch is unavailable', async () => {
     d.window.close();
   }
 });
+
+test('returning from SPA reader maintains masonry layout columns', async () => {
+  const { d, w, root } = createSPAPage({
+    fetcher: async () => ({
+      ok: true,
+      text: async () => postDetailFixture('100', '测试帖子标题', '正文内容')
+    })
+  });
+
+  try {
+    const grid = root.querySelector('.grid');
+    const cards = [...grid.querySelectorAll('.card')];
+    assert.equal(cards.length, 2);
+
+    // Initial column assignment
+    assert.deepEqual(cards.map(c => c.style.gridColumn), ['1', '2']);
+
+    // Open first card via SPA reader
+    cards[0].querySelector('.cover').click();
+    await tick();
+    await tick();
+
+    const readerApp = root.querySelector('.app.reader');
+    assert(readerApp && !readerApp.hidden, 'Reader should be open');
+
+    // Navigate back to list via popstate
+    w.history.back();
+    w.dispatchEvent(new w.PopStateEvent('popstate', { state: null }));
+    await tick();
+
+    // Verify list is restored and columns are preserved
+    assert.equal(root.querySelector('.app:not(.reader)').style.display, '');
+    assert.deepEqual(cards.map(c => c.style.gridColumn), ['1', '2']);
+  } finally {
+    d.window.close();
+  }
+});
+

@@ -31,7 +31,11 @@
       backBtn.setAttribute('aria-label', '返回帖子列表');
       rbar.append(backBtn);
     }
-    rbar.append(node('div', 'brand', 'NGA · 阅读'), node('div', 'spacer'), accountStatus);
+    const rAccountStatus = button('未登录', 'session-status', () => openLogin(rAccountStatus));
+    rAccountStatus.setAttribute('aria-label', '未登录，登录 NGA');
+    rAccountStatus.hidden = !options.container ? accountStatus.hidden : !!currentAccount();
+    const activeAccountStatus = options.container ? rAccountStatus : accountStatus;
+    rbar.append(node('div', 'brand', 'NGA · 阅读'), node('div', 'spacer'), activeAccountStatus);
     const readerMenu = mobileOptions.cloneNode(true);
     readerMenu.setAttribute('aria-label', '阅读设置与账号'); readerMenu.removeAttribute('aria-expanded');
     readerMenu.onclick = () => readingSettings.open(readerMenu); rbar.append(readerMenu);
@@ -55,15 +59,20 @@
       { label: '评论', className: 'dock-count', action: () => stream.querySelector('.comment:not(.op)')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) },
       { label: '回到顶部', className: 'dock-top', action: () => (usesDocumentScroll() ? window : container).scrollTo({ top: 0, behavior: 'smooth' }) }
     ]);
+    const prevAccountChanged = accountChanged;
     accountChanged = info => {
       replyEntry.hidden = !info;
       footer.textContent = info ? '每次只加载一页 · 回复与引用在新标签页打开原版发帖页' : '每次只加载一页';
       for (const card of cards.values()) syncCommentActions(card, card.readerPost, !!info);
+      rAccountStatus.hidden = !!info;
+      if (options.container) prevAccountChanged(info);
     };
     accountChanged(currentAccount());
     if (!options.container) {
       restore.remove(); shadow.append(rrestore);
     }
+    const prevModeToggle = modeToggle;
+    const prevSettingsRefresh = settingsRefresh;
     modeToggle = setMode;
     settingsRefresh = renderReader;
 
@@ -249,7 +258,7 @@
     }
     function openViewer(attachment) {
       viewerReturnFocus = attachment;
-      viewerItems = [...(attachment.closest('.note-gallery') || attachment.closest('.comment') || app).querySelectorAll('.attachment')];
+      viewerItems = [...(attachment.closest('.note-gallery') || attachment.closest('.comment') || container).querySelectorAll('.attachment')];
       showViewerImage(viewerItems.indexOf(attachment));
       if (typeof viewer.showModal === 'function') viewer.showModal(); else viewer.setAttribute('open', '');
       viewerClose.focus();
@@ -503,7 +512,7 @@
 
     function focusRecord(key) {
       const card = cards.get(key); if (!card) return false;
-      let parent = card.parentElement; while (parent && parent !== app) { if (parent.tagName === 'DETAILS') parent.open = true; parent = parent.parentElement; }
+      let parent = card.parentElement; while (parent && parent !== container) { if (parent.tagName === 'DETAILS') parent.open = true; parent = parent.parentElement; }
       card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1700); return true;
     }
 
@@ -538,13 +547,9 @@
           nextPages.set(number,cached.next); pages.set(number,restored); rebuildRecords(); postCache.visit({tid});
           status.textContent = `第 ${number} 页来自本地缓存`; return;
         }
-        const response = await fetch(u.href, { credentials: 'same-origin', signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const finalURL = safeURL(response.url || u.href);
+        const { doc, responseURL } = await ngaApi.fetchDoc(u.href, { signal: controller.signal });
+        const finalURL = safeURL(responseURL || u.href);
         if (!finalURL || finalURL.origin !== pageURL.origin || finalURL.searchParams.get('tid') !== tid) throw new Error('原站返回了其他页面');
-        const bytes = new Uint8Array(await response.arrayBuffer()), initial = new TextDecoder('utf-8').decode(bytes);
-        const encoding = response.headers.get('content-type')?.match(/charset\s*=\s*([\w-]+)/i)?.[1] || initial.slice(0,4096).match(/charset\s*=\s*["']?([\w-]+)/i)?.[1] || 'utf-8';
-        const doc = new DOMParser().parseFromString(new TextDecoder(encoding).decode(bytes), 'text/html');
         const all = parsePosts(doc, u.href), fresh = all.filter(p => !records.has(p.key));
         if (!all.length) throw new Error('需要原站跳转、登录，或页面结构不支持');
         if (!fresh.length) { if (advance) ended = true; status.textContent = '原站未返回新的楼层，已停止重复加载。'; return; }
@@ -597,6 +602,9 @@
         if (scanTimer) clearTimeout(scanTimer);
         nativeObserver?.disconnect?.();
         window.clearInterval(userRefresh);
+        modeToggle = prevModeToggle;
+        settingsRefresh = prevSettingsRefresh;
+        accountChanged = prevAccountChanged;
       },
       title: rtitle.textContent
     };
