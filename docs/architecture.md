@@ -13,6 +13,7 @@
 | `src/adapters/nga/index.js` | NGA 列表解析、错落卡片、收藏、原站跳转和生命周期 |
 | `src/adapters/nga/reader.js` | NGA 正文 / 楼层解析、分页、引用与回复关系 |
 | `src/adapters/nga/list.css` / `reader.css` | 列表和评论的桌面 / 手机样式 |
+| `docs/lifecycle.md` | 组件生命周期规范：状态机、资源清理、防竞争与自查清单 |
 | `scripts/build.mjs` | 汇总模块、样式和元数据，生成独立油猴脚本并检查语法 |
 | `scripts/new-adapter.mjs` | 新网站的适配器骨架，不覆盖已有文件 |
 | `scripts/list-adapters.mjs` | 按分类列出适配器 |
