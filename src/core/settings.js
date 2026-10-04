@@ -168,7 +168,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
   row('本地缓存', 'cacheEnabled', 'checkbox', undefined, cacheOptions); row('帖子上限', 'cacheMaxPosts', 'number', undefined, cacheOptions);
   { const input = controls.get('cacheMaxPosts'); input.min = '1'; input.max = '500'; input.step = '1'; }
   const clearCache = document.createElement('button'); clearCache.type = 'button'; clearCache.className = 'rt-clear-cache'; clearCache.textContent = '清理缓存';
-  const cacheNote = document.createElement('p'); cacheNote.className = 'rt-note'; cacheNote.textContent = '7 天未访问自动清理。手动清理保留收藏书签和阅读设置。';
+  const cacheNote = document.createElement('p'); cacheNote.className = 'rt-note'; cacheNote.textContent = '30 天未访问自动清理。手动清理保留收藏书签和阅读设置。';
   cacheSection.append(cacheUsage, clearCache, cacheOptions, cacheNote); body.append(cacheSection);
   let cacheVersion = 0, clearingCache = false;
   const formatBytes = bytes => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
@@ -180,7 +180,7 @@ function mountSettings({ context = globalThis.window, shadow, app, prefs, save, 
     clearCache.disabled = false;
     cacheUsage.textContent = `缓存估算 ${formatBytes(used.totalBytes)} · 帖子 ${used.posts}/${used.maxPosts} · 回复 ${used.replyPages} 页${used.enabled ? '' : ' · 缓存已关闭'}`;
   }
-  function configureCache() { cache?.configure({enabled:prefs.cacheEnabled !== false,maxPosts:prefs.cacheMaxPosts ?? 500}).then(refreshCache); }
+  function configureCache() { cache?.configure({enabled:prefs.cacheEnabled !== false,maxPosts:prefs.cacheMaxPosts ?? 500,maxMetadataBytes:prefs.cacheMaxMetadataBytes}).then(refreshCache); }
   clearCache.onclick = async () => {
     if (clearingCache) return; clearingCache = true; cacheVersion++; clearCache.disabled = true; cacheUsage.textContent = '正在清理缓存…';
     const cleared = await cache.clear(); clearingCache = false;

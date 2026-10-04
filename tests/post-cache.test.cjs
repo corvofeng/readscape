@@ -40,14 +40,14 @@ test('a cover registered right before an unload is recovered from the pending lo
  assert.equal((await second.getCover('1')).source,'https://img.nga.cn/one.png','pending 日志在下次加载时回填封面');
  assert.equal(w.localStorage.getItem('test-cover-pending'),null,'回填后清理 pending 日志');
 });
-test('posts and covers expire seven days after their last visit, and reads do not extend the lifetime',async()=>{
+test('posts and covers expire 30 days after their last visit, and reads do not extend the lifetime',async()=>{
  const {w,cache}=setup();let now=100000;w.Date.now=()=>now;
  await cache.saveCover('1','https://img.nga.cn/one.png');await cache.saveCover('2','https://img.nga.cn/two.png');
- now+=6*86400000;await cache.visit({tid:'1'});assert(await cache.getCover('2'));
+ now+=29*86400000;await cache.visit({tid:'1'});assert(await cache.getCover('2'));
  now+=2*86400000;assert.equal(await cache.getCover('2'),null);await cache.cleanup();
  assert(await cache.getCover('1'));assert.deepEqual((await records(w.indexedDB)).map(p=>p.tid),['1']);
  assert.equal((await records(w.indexedDB)).find(p=>p.tid==='1').coverId,'https://img.nga.cn/one.png');
- now+=8*86400000;await cache.visit({tid:'1'});assert.equal(await cache.getCover('1'),null,'an expired cover cannot be revived by visiting before cleanup');
+ now+=31*86400000;await cache.visit({tid:'1'});assert.equal(await cache.getCover('1'),null,'an expired cover cannot be revived by visiting before cleanup');
 });
 test('post-count limits evict the oldest posts while recent ones survive',async()=>{
  const {w,cache}=setup({maxPosts:2});let now=1;w.Date.now=()=>now;

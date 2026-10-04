@@ -10,14 +10,14 @@ const html=(ids,next,board=1)=>`<head><title>测试板块</title></head><body>${
 const response=(url,body)=>({ok:true,url,headers:{get:()=>''},arrayBuffer:async()=>new TextEncoder().encode(body).buffer});
 const tick=()=>new Promise(resolve=>setTimeout(resolve,20));
 const metadata=(total,page)=>`<script>var __PAGE = {0:'/thread.php?fid=1', 1: ${total}, 2: ${page}, 3: 35};</script>`;
-async function setup({body=html([1,2],2),url='https://bbs.nga.cn/thread.php?fid=1',mobile=false,cache,observer=false,factory=new IDBFactory()}={}){
+async function setup({body=html([1,2],2),url='https://bbs.nga.cn/thread.php?fid=1',mobile=false,cache,observer=false,factory=new IDBFactory(),prefs={}}={}){
  const dom=new JSDOM(body,{url,runScripts:'dangerously',virtualConsole:new VirtualConsole()}),w=dom.window;
  w.indexedDB=factory;w.Blob=Blob;w.TextDecoder=TextDecoder;w.scrollY=0;w.scrollX=0;w.scrollTo=({top,left=0})=>{w.scrollY=top;w.scrollX=left;};
  w.matchMedia=()=>({matches:mobile,addEventListener:()=>{},removeEventListener:()=>{}});
  const observers=[];
  if(observer)w.IntersectionObserver=class{constructor(callback,options){this.callback=callback;this.options=options;observers.push(this);}observe(){}disconnect(){this.disconnected=true;}};
  if(cache)w.localStorage.setItem(cacheKey,cache);
- w.localStorage.setItem('nga-cards-v1', JSON.stringify({ enabled: true, autoListRefresh: false }));
+ w.localStorage.setItem('nga-cards-v1', JSON.stringify({ enabled: true, autoListRefresh: false, ...prefs }));
  w.eval(bundle);
  for(let i=0;i<100&&w.document.querySelector('#nga-cards-host')?.shadowRoot.querySelector('.grid')?.getAttribute('aria-busy')==='true';i++)await tick();
  return {w,dom,factory,root:w.document.querySelector('#nga-cards-host').shadowRoot,observers};
@@ -144,17 +144,17 @@ test('IndexedDB enforces the global 500-post budget and list data no longer uses
   assert.equal(root.querySelectorAll('.card').length,261);assert.equal(w.localStorage.getItem(cacheKey),null);
  }finally{w.close();}
 });
-test('the cache evicts pages over 10 MB while keeping their cards available in the current stream',async()=>{
- const {w,root,factory}=await setup();
+test('the cache evicts pages exceeding metadata budget while keeping their cards available in the current stream',async()=>{
+ const {w,root,factory}=await setup({ prefs: { cacheMaxMetadataBytes: 1024 } });
  try{
-  w.fetch=async url=>response(url,`<body><table>${row(3,'长'.repeat(5*1024*1024+1))}</table></body>`);
+  w.fetch=async url=>response(url,`<body><table>${row(3,'长'.repeat(1024))}</table></body>`);
   root.querySelector('.list-load').click();await new Promise(resolve=>setTimeout(resolve,100));
   assert.equal(root.querySelectorAll('.card').length,3);
   assert.equal(w.localStorage.getItem(cacheKey),null);assert(!(await rows(factory)).some(p=>p.tid==='3'));
  }finally{w.close();}
 });
 test('expired list pages are discarded instead of being revived by cache hydration',async()=>{
- const old=Date.now()-8*86400000;
+ const old=Date.now()-31*86400000;
  const cache=JSON.stringify({version:1,pages:[{key:'https://bbs.nga.cn/thread.php?fid=1',number:2,url:'https://bbs.nga.cn/thread.php?fid=1&page=2',next:null,at:old,items:[{tid:'3',title:'过期帖子',author:'作者',time:'',url:'https://bbs.nga.cn/read.php?tid=3',latest:'',lastAccess:old}]}]});
  const {w,root}=await setup({cache});
  try{for(let attempt=0;attempt<100&&w.localStorage.getItem(cacheKey)!==null;attempt++)await tick();assert.equal(root.querySelectorAll('.card').length,2);assert(!root.querySelector('.list-load').hidden);assert.equal(w.localStorage.getItem(cacheKey),null);}finally{w.close();}

@@ -1,8 +1,8 @@
-function createPostCache({ context = globalThis.window, key, maxPosts = 500, maxMetadataBytes = 10 * 1024 * 1024, ttl = 7 * 86400000 }) {
+function createPostCache({ context = globalThis.window, key, maxPosts = 500, maxMetadataBytes = 500 * 1024 * 1024, ttl = 30 * 86400000 }) {
   const stores = ['posts', 'replyPages', 'relations', 'listPages'];
   const listeners = new Set();
   let connection, queue = Promise.resolve(), closed = false, epoch = 0;
-  let enabled = true, postLimit = maxPosts;
+  let enabled = true, postLimit = maxPosts, metadataLimit = maxMetadataBytes;
   const channel = typeof context.BroadcastChannel === 'function' ? new context.BroadcastChannel(`${key}-cache-events`) : null;
   const validTid = tid => /^\d+$/.test(String(tid));
   const size = value => JSON.stringify(value).length * 2;
@@ -81,7 +81,7 @@ function createPostCache({ context = globalThis.window, key, maxPosts = 500, max
     const bytes = row => { if (!sizes.has(row)) sizes.set(row,size(row)); return sizes.get(row); };
     const metadataBytes = ['posts','replyPages'].reduce((sum, name) => sum + [...model[name].values()].reduce((n, row) => n + bytes(row), 0), 0) + [...model.listPages.values()].reduce((n,row)=>n+size(row),0) +
       [...model.relations.values()].filter(r => r.kind !== 'favorite').reduce((n, row) => n + bytes(row), 0);
-    return { available: true, posts: model.posts.size, replyPages: model.replyPages.size, metadataBytes, totalBytes: metadataBytes, favorites: [...model.relations.values()].filter(r => r.kind === 'favorite').length, enabled, maxPosts: postLimit, maxMetadataBytes };
+    return { available: true, posts: model.posts.size, replyPages: model.replyPages.size, metadataBytes, totalBytes: metadataBytes, favorites: [...model.relations.values()].filter(r => r.kind === 'favorite').length, enabled, maxPosts: postLimit, maxMetadataBytes: metadataLimit };
   }
   function prune(model) {
     const now = Date.now();
@@ -89,7 +89,7 @@ function createPostCache({ context = globalThis.window, key, maxPosts = 500, max
     const sizes = new WeakMap();
     for (const p of [...model.posts.values()].sort((a,b) => a.lastAccess - b.lastAccess)) {
       const used = usage(model,sizes);
-      if (used.posts <= postLimit && used.metadataBytes <= maxMetadataBytes) break;
+      if (used.posts <= postLimit && used.metadataBytes <= metadataLimit) break;
       removePost(model, p.tid);
     }
   }
@@ -211,10 +211,11 @@ function createPostCache({ context = globalThis.window, key, maxPosts = 500, max
   async function getCover(tid) { const post = await getPost(tid); return post?.coverId ? { source: post.coverId, width: post.coverW, height: post.coverH } : null; }
   const cleanup=()=>enqueue(async()=>{if(!await ready)return null;return mutate(()=>true);});
   const remove=tids=>write(model=>{for(const tid of tids)removePost(model,String(tid));return true;});
-  async function stats(){const used=await read(usage,true);return used||{available:false,enabled,maxPosts:postLimit,maxMetadataBytes};}
+  async function stats(){const used=await read(usage,true);return used||{available:false,enabled,maxPosts:postLimit,maxMetadataBytes:metadataLimit};}
   function configure(options={}) {
     const changed=enabled!==(options.enabled!==false);enabled=options.enabled!==false;
     postLimit=Math.max(1,Math.min(maxPosts,Math.trunc(Number(options.maxPosts)||maxPosts)));
+    if (options.maxMetadataBytes != null && Number.isFinite(Number(options.maxMetadataBytes))) metadataLimit = Math.max(1024, Number(options.maxMetadataBytes));
     if(changed)epoch++;return cleanup();
   }
   function clear() {
