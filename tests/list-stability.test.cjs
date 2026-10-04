@@ -291,3 +291,70 @@ test('a new cover applies automatically after returning even with autoListRefres
     assert(!root.querySelector('.list-refresh-bar').classList.contains('has-update'));
   } finally { cache?.close(); w.close(); }
 });
+
+test('clicked post style is preserved on return and defers cover update until scrolled out of view', async () => {
+  const { w, root } = await setup({ automatic: true }); let cache;
+  try {
+    w.eval(fs.readFileSync(__dirname + '/../src/core/post-cache.js', 'utf8') + ';window.createPostCache = createPostCache;');
+    cache = w.createPostCache({ context: w, key: 'nga-cards-v1' });
+    const card = root.querySelector('.card');
+    assert.equal(card.dataset.tid, '1');
+
+    // 用户点击卡片封面
+    card.querySelector('.cover').click();
+
+    // 模拟进入阅读器并在阅读期间发现首楼图片缓存为封面
+    const frame = w.document.createElement('iframe');
+    frame.dataset.readscapeReader = 'true';
+    w.document.documentElement.append(frame);
+    await cache.saveCover('1', 'https://img.nga.cn/clicked-post-cover.png', { coverW: 640, coverH: 1407 });
+    await wait(200);
+    assert.equal(card.querySelector('img'), null, '阅读期间不修改列表卡片');
+
+    // 模拟从阅读器返回到列表
+    w.document.querySelectorAll('iframe[data-readscape-reader]').forEach(f => f.remove());
+    w.document.dispatchEvent(new w.Event('readscape-list-resume'));
+    await wait(800);
+
+    // 关键验证：返回后，用户当前点击帖子的样式必须保持恒定，不突变、不刷新、不注入图片封面
+    assert.equal(card.querySelector('img'), null, '返回后用户点击帖子的样式必须恒定保持，不得立即刷新注入封面');
+    assert.equal(card.classList.contains('card-updated'), false, '不得触发卡片刷新动画');
+
+    // 模拟用户上下滑动列表，该卡片滑出视口
+    card.getBoundingClientRect = () => ({ top: -300, bottom: -50, width: 200, height: 150 });
+    w.dispatchEvent(new w.Event('scroll'));
+    root.querySelector('.app').dispatchEvent(new w.Event('scroll', { bubbles: true }));
+    await wait(150);
+
+    // 卡片在视口外时静默完成更新
+    assert.equal(card.querySelector('img')?.src, 'https://img.nga.cn/clicked-post-cover.png', '滑出视口后静默更新封面');
+  } finally { cache?.close(); w.close(); }
+});
+
+test('posts currently in view maintain constant style while out of view posts update on scroll', async () => {
+  const { w, root } = await setup({ automatic: true }); let cache;
+  try {
+    w.eval(fs.readFileSync(__dirname + '/../src/core/post-cache.js', 'utf8') + ';window.createPostCache = createPostCache;');
+    cache = w.createPostCache({ context: w, key: 'nga-cards-v1' });
+    const cards = [...root.querySelectorAll('.card')];
+    const inViewCard = cards[0];
+    const outOfViewCard = cards[1];
+
+    // 模拟卡片位置：inViewCard 在视口内，outOfViewCard 在视口外下方
+    inViewCard.getBoundingClientRect = () => ({ top: 100, bottom: 250, width: 200, height: 150 });
+    outOfViewCard.getBoundingClientRect = () => ({ top: 900, bottom: 1050, width: 200, height: 150 });
+
+    // 两个卡片同时收到封面更新通知
+    await cache.saveCover(inViewCard.dataset.tid, 'https://img.nga.cn/in-view.png', { coverW: 640, coverH: 1407 });
+    await cache.saveCover(outOfViewCard.dataset.tid, 'https://img.nga.cn/out-of-view.png', { coverW: 640, coverH: 1407 });
+    await wait(100);
+
+    // 用户滚动页面
+    root.querySelector('.app').dispatchEvent(new w.Event('scroll', { bubbles: true }));
+    await wait(150);
+
+    // 视口内的卡片样式恒定不变，不在视口的卡片已完成更新
+    assert.equal(inViewCard.querySelector('img'), null, '视口内的卡片样式恒定不变');
+    assert.equal(outOfViewCard.querySelector('img')?.src, 'https://img.nga.cn/out-of-view.png', '不在视口的卡片在滚动时已更新');
+  } finally { cache?.close(); w.close(); }
+});

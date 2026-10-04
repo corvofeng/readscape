@@ -49,7 +49,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   const isForumRoot = /^\/(?:index\.php|forum\.php)?$/.test(pageURL.pathname) && !pageURL.searchParams.has('fid') && !pageURL.searchParams.has('stid') && !pageURL.searchParams.has('tid');
   let cardObserver, listObserver;
   const listCards = new Map();
-  let coverDisposed = false, readerApp = null;
+  let coverDisposed = false, readerApp = null, activeClickedTid = null;
   let gateHandled = false, gateTimer;
   let modeToggle = toggle;
   let settingsRefresh = render;
@@ -169,6 +169,11 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     if (!cover || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault(); cover.focus({ preventScroll: true });
   });
+  grid.addEventListener('click', event => {
+    const cover = event.target.closest?.('a.cover');
+    const card = cover?.closest?.('.card');
+    if (card?.dataset?.tid) activeClickedTid = card.dataset.tid;
+  }, { capture: true });
   const empty = node('div', 'empty'), pager = node('nav', 'pager'); pager.setAttribute('aria-label', '论坛分页');
   main.append(intro, subforumStrip, tabs, grid, empty, pager, node('div', 'foot', '按原站顺序追加 · 热议为已加载帖子回复 ≥ 100 · 收藏仅存本浏览器'));
   app.append(top, main);
@@ -394,7 +399,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     postCache.getCover(tid).then(cached => {
       if (!cached || coverDisposed || generation !== postCache.generation || !card.isConnected) return;
       if (card.coverSignature === JSON.stringify([cached.source, cached.width || 0, cached.height || 0])) return;
-      if (listInteraction || readerCoversList()) queueListCover(card, cached);
+      if (listInteraction || readerCoversList() || isCardInView(card) || card.dataset.tid === activeClickedTid) queueListCover(card, cached);
       else setCardCover(card, cached);
     }).catch(() => {}).finally(() => { card.coverLoading = false; });
   }
@@ -631,6 +636,7 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
     currentOpener = opener;
     const tid = url.searchParams.get('tid');
     if (!tid) return false;
+    activeClickedTid = tid;
 
     if (activeSPAController) {
       activeSPAController.abort();

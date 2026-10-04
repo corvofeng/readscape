@@ -20,3 +20,21 @@ test('CDP discovery URLs follow the reachable host and tunnel port', async () =>
   assert.equal(debuggerUrl('ws://localhost:9222/devtools/browser/abc', 'https://browser.example'),
     'wss://browser.example/devtools/browser/abc');
 });
+
+test('live CDP connection via /json/version (optional, skipped if unreachable)', async (t) => {
+  const endpoint = process.env.CDP_URL || 'http://192.168.101.165:9222';
+  const { discover } = await import('../scripts/cdp.mjs');
+  let version;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    version = await discover(endpoint, '/json/version', { signal: controller.signal });
+    clearTimeout(timeout);
+  } catch (error) {
+    t.skip(`CDP 不通或未开启 (${endpoint}): ${error.message}，跳过此测试`);
+    return;
+  }
+  assert.ok(version.Browser, '返回 Browser 版本信息');
+  assert.ok(version['Protocol-Version'], '返回 CDP 协议版本');
+  assert.ok(version.webSocketDebuggerUrl, '返回 webSocketDebuggerUrl');
+});

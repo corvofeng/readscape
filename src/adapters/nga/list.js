@@ -12,8 +12,74 @@
   function listCanUpdate() {
     return !coverDisposed && !app.hidden && !document.hidden && !readerCoversList() && !listPointers.size && !pullStart && !listBusy && !app.classList.contains('rt-settings-open') && Date.now() - listActivityAt >= 650;
   }
-  function applyListCovers() {
+  function isCardInView(card) {
+    if (!card || !card.isConnected) return false;
+    if (activeClickedTid && card.dataset.tid === activeClickedTid) {
+      const rect = card.getBoundingClientRect();
+      if (rect.bottom !== 0 || rect.top !== 0) {
+        const topBar = top?.getBoundingClientRect();
+        const topBarBottom = topBar ? topBar.bottom : 0;
+        const viewBottom = usesDocumentScroll() ? (window.innerHeight || document.documentElement.clientHeight || 0) : app.getBoundingClientRect().bottom;
+        const viewTop = usesDocumentScroll() ? topBarBottom : Math.max(topBarBottom, app.getBoundingClientRect().top);
+        if (rect.bottom <= viewTop || rect.top >= viewBottom) return false;
+      }
+      return true;
+    }
+    const rect = card.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0) return false;
+    const topBar = top?.getBoundingClientRect();
+    const topBarBottom = topBar ? topBar.bottom : 0;
+    if (usesDocumentScroll()) {
+      const viewBottom = window.innerHeight || document.documentElement.clientHeight || 0;
+      return rect.bottom > topBarBottom && rect.top < viewBottom;
+    } else {
+      const appRect = app.getBoundingClientRect();
+      const viewTop = Math.max(topBarBottom, appRect.top);
+      const viewBottom = appRect.bottom;
+      return rect.bottom > viewTop && rect.top < viewBottom;
+    }
+  }
+  function applyPendingOutOfViewCovers() {
     if (!pendingListCovers.size || coverDisposed) return;
+    const toUpdate = [];
+    for (const [tid, cached] of pendingListCovers) {
+      const card = listCards.get(tid)?.card;
+      if (!card?.isConnected) {
+        pendingListCovers.delete(tid);
+        continue;
+      }
+      if (!isCardInView(card)) {
+        toUpdate.push({ tid, card, cached });
+      }
+    }
+    if (!toUpdate.length) return;
+    const position = getReadingScroll();
+    const anchor = [...grid.children].find(card => card.getBoundingClientRect().bottom > top.getBoundingClientRect().bottom);
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    for (const { tid, card, cached } of toUpdate) {
+      setCardCover(card, cached);
+      pendingListCovers.delete(tid);
+      if (activeClickedTid === tid) activeClickedTid = null;
+    }
+    layoutMasonry();
+    if (position <= 2) setReadingScroll(0);
+    else if (anchor?.isConnected) {
+      const newAnchorTop = anchor.getBoundingClientRect().top;
+      if (Math.abs(newAnchorTop - anchorTop) > 0.5) {
+        setReadingScroll(position + newAnchorTop - anchorTop);
+      }
+    }
+    if (!pendingListPage && !pendingListCovers.size) {
+      refreshBar.classList.remove('has-update');
+      refreshButton.hidden = true;
+    }
+  }
+  function applyListCovers(forceAll = false) {
+    if (!pendingListCovers.size || coverDisposed) return;
+    if (!forceAll) {
+      applyPendingOutOfViewCovers();
+      return;
+    }
     const position = getReadingScroll();
     const anchor = [...grid.children].find(card => card.getBoundingClientRect().bottom > top.getBoundingClientRect().bottom);
     const anchorTop = anchor?.getBoundingClientRect().top;
@@ -22,9 +88,16 @@
       const card = listCards.get(tid)?.card;
       if (card?.isConnected) setCardCover(card, cached);
     }
-    pendingListCovers.clear(); layoutMasonry();
+    pendingListCovers.clear();
+    activeClickedTid = null;
+    layoutMasonry();
     if (position <= 2) setReadingScroll(0);
-    else if (anchor?.isConnected) setReadingScroll(position + anchor.getBoundingClientRect().top - anchorTop);
+    else if (anchor?.isConnected) {
+      const newAnchorTop = anchor.getBoundingClientRect().top;
+      if (Math.abs(newAnchorTop - anchorTop) > 0.5) {
+        setReadingScroll(position + newAnchorTop - anchorTop);
+      }
+    }
     for (const card of grid.children) {
       const old = before.get(card.dataset.tid);
       if (old && old.html !== card.innerHTML) {
@@ -39,8 +112,8 @@
   }
   function queueListCover(card, cached) {
     pendingListCovers.set(card.dataset.tid, cached);
-    if (!readerCoversList() && !listInteraction) {
-      applyListCovers();
+    if (!readerCoversList() && !listInteraction && !isCardInView(card) && card.dataset.tid !== activeClickedTid) {
+      applyPendingOutOfViewCovers();
     } else if (prefs.autoListRefresh !== false) {
       pendingAutomatic = true;
       scheduleListUpdate();
@@ -54,7 +127,8 @@
       else if (!document.hidden && !readerCoversList() && !app.hidden) scheduleListUpdate();
     }, 700);
   }
-  function stopListRefresh() { clearTimeout(autoRefreshTimer); clearTimeout(listUpdateTimer); autoRefreshTimer = listUpdateTimer = null; }
+  let scrollCoversTimer = null;
+  function stopListRefresh() { clearTimeout(autoRefreshTimer); clearTimeout(listUpdateTimer); clearTimeout(scrollCoversTimer); autoRefreshTimer = listUpdateTimer = scrollCoversTimer = null; }
   function configureListRefresh() {
     clearTimeout(autoRefreshTimer);
     if (prefs.autoListRefresh === false) { pendingAutomatic = false; clearTimeout(listUpdateTimer); return; }
@@ -150,7 +224,18 @@
   app.addEventListener('pointerdown', event => { listInteraction = true; listPointers.add(event.pointerId); markListActivity(); }, { passive: true, capture: true });
   const releasePointer = event => { listPointers.delete(event.pointerId); markListActivity(); };
   window.addEventListener('pointerup', releasePointer, { passive: true }); window.addEventListener('pointercancel', releasePointer, { passive: true });
-  for (const target of [app, window]) target.addEventListener('scroll', markListActivity, { passive: true });
+  function handleListScroll() {
+    markListActivity();
+    if (!pendingListCovers.size || coverDisposed || readerCoversList()) return;
+    if (scrollCoversTimer) return;
+    scrollCoversTimer = setTimeout(() => {
+      scrollCoversTimer = null;
+      if (pendingListCovers.size && !coverDisposed && !readerCoversList()) {
+        applyPendingOutOfViewCovers();
+      }
+    }, 80);
+  }
+  for (const target of [app, window]) target.addEventListener('scroll', handleListScroll, { passive: true });
   function resetPull() { pullStart = null; pullDistance = 0; pullIndicator.classList.remove('is-visible', 'is-ready'); }
   app.addEventListener('touchstart', event => {
     resetPull();
