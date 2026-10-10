@@ -5,9 +5,66 @@
 // ========================================================
 
 function createNGAApi({ pageURL, safeURL }) {
-  async function fetchDoc(url, { signal, cache = 'default' } = {}) {
+  // 访客闸门：NGA 偶尔把正常浏览判成“访客直接访问”，回一页 (ERROR:15) 访客不能直接访问。
+  // 那页的内联脚本里带着服务器现场签发的通行证（document.cookie='guestJs=…'），
+  // 写回 cookie 再换个 rand 参数重发就能放行——等价于原页那个“如不能自动跳转 可点此链接”，
+  // 但不必整页跳转。捡不到通行证、超出配额或 cookie 写不进就交回调用方走原有的整页兜底。
+  const gate = { title: '访客不能直接访问', ttl: 3200000, retries: 2, guardWindow: 120000, guardLimit: 2, guardKey: 'nga-gate-' };
+
+  function isGateHTML(html) {
+    return typeof html === 'string' && html.includes(gate.title) && /\(\s*ERROR:/.test(html);
+  }
+
+  function extractGuestPass(html) {
+    return /guestJs['"]?\s*=\s*([^;'"\s]+)/.exec(html || '')?.[1] || null;
+  }
+
+  function writeGuestPass(token) {
+    const expires = new Date(Date.now() + gate.ttl).toUTCString(), epoch = 'Thu, 01 Jan 1970 00:00:00 GMT';
+    // 个别 host 不接受 domain 属性，带域写不进去就退回仅当前主机再试一次。
+    for (const scope of [`domain=${location.hostname};`, '']) {
+      try {
+        document.cookie = `guestJs=${token};${scope}path=/;expires=${expires};SameSite=Lax`;
+        document.cookie = `lastpath=0;${scope}path=/;expires=${epoch}`;
+        if (document.cookie.includes(`guestJs=${token}`)) return true;
+      } catch { /* 禁用 cookie 时交给上层用整页流程处理 */ }
+    }
+    return false;
+  }
+
+  function gateRetryURL(url) {
+    const u = new URL(url, pageURL.href);
+    u.searchParams.set('rand', String(Math.floor(Math.random() * 1000)));
+    return u.href;
+  }
+
+  // sessionStorage 配额：同一目标两分钟最多自愈两次，防止闸门循环。
+  function gateGuardAllows(url) {
+    let u;
+    try { u = safeURL(url, pageURL.href) || new URL(url, pageURL.href); } catch { return false; }
+    const key = gate.guardKey + (u.searchParams.get('stid') || u.searchParams.get('fid') || u.searchParams.get('tid') || u.searchParams.get('uid') || u.pathname);
+    let state;
+    try { state = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { return false; }
+    if (!state || Date.now() - state.start > gate.guardWindow) state = { start: Date.now(), count: 0 };
+    if (state.count >= gate.guardLimit) return false;
+    state.count++;
+    try { sessionStorage.setItem(key, JSON.stringify(state)); return true; } catch { return false; }
+  }
+
+  function gateWait(ms, signal) {
+    return new Promise((resolve, reject) => {
+      const fail = () => {
+        clearTimeout(timer);
+        reject(signal?.reason || new (window.DOMException || Error)('Aborted', 'AbortError'));
+      };
+      const timer = setTimeout(() => { try { signal?.removeEventListener?.('abort', fail); } catch {} resolve(); }, ms);
+      if (signal?.aborted) fail();
+      else try { signal?.addEventListener?.('abort', fail, { once: true }); } catch {}
+    });
+  }
+
+  async function requestDoc(url, { signal, cache }) {
     const response = await fetch(url, { credentials: 'same-origin', cache, signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     let bytes;
     if (typeof response.arrayBuffer === 'function') {
       bytes = new Uint8Array(await response.arrayBuffer());
@@ -20,8 +77,21 @@ function createNGAApi({ pageURL, safeURL }) {
     const encoding = response.headers?.get?.('content-type')?.match(/charset\s*=\s*([\w-]+)/i)?.[1]
       || initial.slice(0, 4096).match(/charset\s*=\s*["']?([\w-]+)/i)?.[1]
       || 'utf-8';
-    const doc = new DOMParser().parseFromString(new TextDecoder(encoding).decode(bytes), 'text/html');
-    return { doc, responseURL: response.url || url };
+    const html = new TextDecoder(encoding).decode(bytes);
+    // 闸门偶尔也带 4xx 状态返回；正文里有通行证就照样当闸门处理，其余错误照旧抛出。
+    if (!response.ok && !isGateHTML(html)) throw new Error(`HTTP ${response.status}`);
+    return { doc: new DOMParser().parseFromString(html, 'text/html'), html, responseURL: response.url || url };
+  }
+
+  async function fetchDoc(url, { signal, cache = 'default' } = {}) {
+    for (let attempt = 0; ; attempt++) {
+      // 闸门页可能正卡在缓存里，重试一律绕过缓存。
+      const result = await requestDoc(url, { signal, cache: attempt ? 'no-store' : cache });
+      const pass = isVisitorGate(result.doc) ? extractGuestPass(result.html) : null;
+      if (!pass || attempt >= gate.retries || !gateGuardAllows(url) || !writeGuestPass(pass)) return result;
+      await gateWait(300 + Math.floor(Math.random() * 300), signal);
+      url = gateRetryURL(url);
+    }
   }
 
   function isDeletedDoc(doc) {
@@ -34,8 +104,10 @@ function createNGAApi({ pageURL, safeURL }) {
       /(?:ERROR:\s*62\s*\)?\s*>\s*)?帖子(?:不存在或)?(?:已[被经]|被)?删除/.test(text);
   }
 
-  function isVisitorGate(doc) {
-    return doc?.title === '访客不能直接访问';
+  function isVisitorGate(source) {
+    if (!source) return false;
+    if (typeof source === 'string') return isGateHTML(source);
+    return (source.title || '').trim() === gate.title || isGateHTML(source.body?.innerHTML || '');
   }
 
   function hasThreadContent(doc) {
@@ -80,7 +152,7 @@ function createNGAApi({ pageURL, safeURL }) {
     const { doc, responseURL } = await fetchDoc(url, { signal, cache: 'no-cache' });
     if (validListURL && !validListURL(responseURL, number)) throw new Error('原站返回了其他页面');
     const items = extractTopics(doc, url);
-    if (!items.length) throw new Error('需要原站跳转、登录，或页面结构不支持');
+    if (!items.length) throw new Error(isVisitorGate(doc) ? '原站访客闸门未能自动放行，可能需要登录或稍后重试' : '需要原站跳转、登录，或页面结构不支持');
     const next = nextListURL ? nextListURL(doc, number, url) : null;
     return { url, items: items.map(item => ({ ...item, lastAccess: Date.now() })), next };
   }
@@ -93,6 +165,9 @@ function createNGAApi({ pageURL, safeURL }) {
     fetchDoc,
     isDeletedDoc,
     isVisitorGate,
+    isGateHTML,
+    extractGuestPass,
+    writeGuestPass,
     hasThreadContent,
     extractTopics,
     fetchListPage,

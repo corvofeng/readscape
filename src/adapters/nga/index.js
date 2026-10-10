@@ -207,7 +207,8 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
   viewportObserver.observe(document.head, {childList:true,subtree:true,attributes:true,attributeFilter:['content']});
   window.addEventListener('pagehide', () => viewportObserver.disconnect());
 
-  // 仅点击 NGA 已提供的普通跳转链接；不调用未公开接口，不点击登录或验证按钮。
+  // 整页就是闸门页时的兜底：仅点击 NGA 已提供的普通跳转链接；不调用未公开接口，
+  // 不点击登录或验证按钮。后台请求遇到的偶发闸门已在数据层用通行证自愈。
   // sessionStorage 跨刷新计数：同一板块两分钟最多尝试两次，防止跳转循环。
   function autoContinue() {
     if (gateHandled || document.title !== '访客不能直接访问') return;
@@ -678,6 +679,8 @@ function runAdapter({ navigation, postCache, context = globalThis.window }) {
           return;
         }
 
+        // fetchDoc 已经捡过 guestJs 通行证重试；仍拿不到正文就退回整页流程，
+        // 交给原页自己的跳转与登录提示接手。
         if (ngaApi.isVisitorGate(doc) || !ngaApi.hasThreadContent(doc)) {
           location.assign(url.href);
           return;
