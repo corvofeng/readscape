@@ -1,5 +1,11 @@
 # 变更历史
 
+## v3.0.7
+
+- 发布产物新增博客 R2 镜像同步：每次打标签发版，除 GitHub `dist` 分支外，额外上传到 `https://rawforcorvofeng.cn/readscape/`（桶内独立前缀，布局与 dist 分支一致：根目录为自动更新版，`v<版本>/` 为固定版归档）。
+- 镜像最新版的 `@updateURL`/`@downloadURL` 指向镜像自身：GitHub raw 不可达的地区/网络下，从镜像安装即可继续自动更新。脚本功能本身无变化。
+- 新增 `npm run publish:r2`（`scripts/publish-r2.mjs`，零依赖 S3 签名上传，支持 `--env-file`/`--with-archive`/`--check`），可在本地手动同步。
+
 ## v3.0.6
 
 - 访客闸门自愈：后台抓取帖子、回复页或列表遇到 NGA 的“(ERROR:15) 访客不能直接访问”（含带 403 状态返回的情况）时，直接取用该页自带的 `guestJs` 通行证写回 cookie，换 `rand` 参数绕开缓存重试，偶发拦截不再需要整页跳转；同一目标两分钟最多自愈两次，通行证缺失或 cookie 被禁用时仍退回原有的整页跳转与登录提示。其余 HTTP 错误仍然照常报错。
