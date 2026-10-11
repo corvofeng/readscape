@@ -28,8 +28,8 @@
 // @run-at       document-start
 // @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
-// @updateURL    https://raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga.user.js
-// @downloadURL  https://raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga.user.js
+// @updateURL    none
+// @downloadURL  none
 // @license      MIT
 // ==/UserScript==
 
