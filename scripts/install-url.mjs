@@ -21,10 +21,12 @@ const base = process.env.READSCAPE_UPDATE_BASE
   || `https://${token ? `${token}@` : ''}raw.githubusercontent.com/${repo.owner}/${repo.name}/${repo.branch}`;
 
 console.log(`仓库: ${repo.owner}/${repo.name}（分支 ${repo.branch}）\n`);
+const mirrorBase = (process.env.R2_PUBLIC_BASE || 'https://rawforcorvofeng.cn').replace(/\/$/, '');
 for (const id of targets) {
   const url = `${base.replace(/\/$/, '')}/readscape-${id}.user.js`;
   console.log(`阅境 · ${id}`);
   console.log(`  安装/更新地址: ${url}`);
+  console.log(`  备用镜像地址: ${mirrorBase}/readscape/readscape-${id}.user.js`);
   if (process.platform === 'darwin' && process.env.READSCAPE_OPEN === '1') {
     try { execFileSync('open', [url]); console.log('  已在浏览器打开（在油猴中确认安装）'); } catch {}
   }

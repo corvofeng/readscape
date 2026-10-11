@@ -22,6 +22,7 @@ GitHub Actions（`.github/workflows/ci-cd.yml`）负责持续集成与发布：
 - **`verify`**：向 `main` 推送或提 PR 时运行 `npm ci && npm run check`（构建 + `node --check` 语法检查 + 全部测试），并把 `dist/*.user.js` 作为构建产物上传。
 - **`publish`**：推送 `v*` 标签时（普通 `main` 推送只跑 verify，不更新 dist），在独立的 **`dist` 分支**追加提交，保留已有版本目录。根目录的 `readscape-<id>.user.js` 提供自动更新；`v<版本>/readscape-<id>.user.js` 提供固定安装。重新发布相同标签时只允许相同文件，内容不同则失败；补发旧标签不会把根目录脚本降级。标签必须与 `package.json` 和脚本版本一致。发布任务串行执行，通过普通推送保留产物历史。
 - **Release**：新发布的 `v*` 标签额外创建 GitHub Release，附上**不含 token、禁用自动更新**的固定版脚本。原有 Release 附件保持原样，旧版的固定脚本可从 dist 版本目录安装。
+- **R2 镜像**：`publish` 任务末尾把产物同步到博客 Cloudflare R2（桶 `blog`，域名 `rawforcorvofeng.cn` 映射桶根目录），放在独立前缀 `readscape/` 下：`readscape/readscape-<id>.user.js` 为最新版，`readscape/v<版本>/…` 为固定版归档。同步前会用 `READSCAPE_UPDATE_BASE=https://rawforcorvofeng.cn/readscape` 重新构建最新版，使从镜像安装的用户脚本更新检查也只依赖博客域名（GitHub raw 不可达时仍可自动更新）。需在仓库配置 secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_ENDPOINT`、`R2_BUCKET`（值与本地 `~/.env.r2-blog` 相同；endpoint 区域固定 `auto`）。缺 secrets 时该步跳过并给出警告。上传走 `scripts/publish-r2.mjs`（S3 兼容 SigV4，零依赖），本地手动发布：`npm run publish:r2 -- --env-file ~/.env.r2-blog --with-archive --check`。镜像最新版的安装地址：`https://rawforcorvofeng.cn/readscape/readscape-nga.user.js`。
 
 构建器为每个脚本写入 `@updateURL` / `@downloadURL`（外加 `@homepageURL` / `@supportURL`），指向 `dist` 分支的 raw 地址：
 

@@ -23,11 +23,14 @@
 
 👉 **[点击一键安装：阅境 · NGA（自动更新版）](https://raw.githubusercontent.com/corvofeng/readscape/dist/readscape-nga.user.js)**
 
+GitHub 不可达时可用博客 R2 镜像（同一产物、独立更新源）：
+👉 **[备用安装：阅境 · NGA（镜像自动更新版）](https://rawforcorvofeng.cn/readscape/readscape-nga.user.js)**
+
 安装完成后，打开或刷新任意 [NGA 论坛页面](https://bbs.nga.cn/)（如板块列表、帖子正文）即可生效。
 
 ### 安装说明与排查
 - **Chrome / Chromium 浏览器**：若点击链接未弹出油猴安装页面，请进入 `chrome://extensions`，找到 Tampermonkey 并开启「开发者模式」及「允许用户脚本运行」权限。
-- **固定版本（禁用自动更新）**：如果希望锁定版本，可前往 [Releases 页面](https://github.com/corvofeng/readscape/releases) 下载 `.user.js` 附件，或访问 [dist 分支版本归档](https://github.com/corvofeng/readscape/tree/dist)。
+- **固定版本（禁用自动更新）**：如果希望锁定版本，可前往 [Releases 页面](https://github.com/corvofeng/readscape/releases) 下载 `.user.js` 附件，或访问 [dist 分支版本归档](https://github.com/corvofeng/readscape/tree/dist)；镜像侧对应 [`readscape/v<版本>/`](https://rawforcorvofeng.cn/readscape/) 目录。
 - **避免冲突**：请勿与其他 NGA 论坛美化或重排脚本同时开启。本脚本在扩展中显示名称为「阅境 · NGA」。
 
 ---
@@ -82,7 +85,8 @@
 - **仓库架构**：产物集中在独立的 `dist` 分支；`main` 分支纯源码；`npm run build` 生成的本地 `dist/` 默认忽略。
 - **本地开发**：`npm run dev` 启动开发服务，修改 `src/` 源码自动构建并触发浏览器页面刷新。
 - **远端联调**：支持跨机器 CDP 调试（`scripts/dev-browser.sh` 与 `scripts/verify-tm.mjs`）。
-- **安装地址生成**：开发者如需生成或查看安装地址，可运行 `npm run install-url`（公开仓库默认生成干净的 raw 直链）。
+- **安装地址生成**：开发者如需生成或查看安装地址，可运行 `npm run install-url`（公开仓库默认生成干净的 raw 直链，同时列出博客 R2 备用镜像地址）。
+- **R2 镜像发布**：产物每次发版会同步到博客 R2 镜像 `https://rawforcorvofeng.cn/readscape/`（需在仓库配置 `R2_*` secrets）；本地也可手动执行 `npm run publish:r2 -- --env-file ~/.env.r2-blog --with-archive --check`（先按需以 `READSCAPE_UPDATE_BASE` 构建镜像版）。
 - **自动化测试**：运行 `npm run check` 执行全量构建、产物语法检查与 118 项端到端及模块回归测试。
 - 更多请参考 [开发指南](docs/development.md)。
 

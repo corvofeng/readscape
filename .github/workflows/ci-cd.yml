@@ -95,3 +95,22 @@ jobs:
         with:
           files: dist/${{ github.ref_name }}/*.user.js
           generate_release_notes: true
+
+      # 3) 同步到博客 R2 镜像（rawforcorvofeng.cn 的 blog 桶，独立前缀 readscape/）。
+      #    最新产物的更新基址改指镜像域名，从镜像安装后检查更新同样不依赖 GitHub。
+      #    未配置 R2 secrets 时跳过，不阻塞发布。需在仓库 secrets 里添加
+      #    R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_ENDPOINT / R2_BUCKET（值见 ~/.env.r2-blog）。
+      - name: 同步产物到博客 R2 镜像
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_REGION: auto
+        run: |
+          if [ -z "$R2_BUCKET" ] || [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ] || [ -z "$R2_ENDPOINT" ]; then
+            echo "::warning::未配置 R2 镜像 secrets（R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_ENDPOINT/R2_BUCKET），跳过 rawforcorvofeng.cn 同步。"
+            exit 0
+          fi
+          READSCAPE_UPDATE_BASE="${R2_PUBLIC_BASE:-https://rawforcorvofeng.cn}/readscape" npm run build
+          node scripts/publish-r2.mjs --with-archive --check
